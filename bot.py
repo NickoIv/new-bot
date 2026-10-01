@@ -223,11 +223,15 @@ CITIES = {
         {"key": "hoi_an", "icon": "🏮", "name": "Хойан", "en": "Hoi An", "lat": 15.8801, "lon": 108.3380},
         {"key": "nha_trang", "icon": "🏖", "name": "Нячанг", "en": "Nha Trang", "lat": 12.2388, "lon": 109.1967},
         {"key": "phu_quoc", "icon": "🏝", "name": "Фукуок", "en": "Phu Quoc", "lat": 10.2899, "lon": 103.9840},
+        {"key": "ho_chi_minh", "icon": "🏙", "name": "Хошимин", "en": "Ho Chi Minh City", "lat": 10.8231, "lon": 106.6297},
+        {"key": "hue", "icon": "🏯", "name": "Хюэ", "en": "Hue Vietnam", "lat": 16.4637, "lon": 107.5909},
+        {"key": "da_lat", "icon": "🌲", "name": "Далат", "en": "Da Lat Vietnam", "lat": 11.9404, "lon": 108.4583},
     ],
     "id": [
         {"key": "denpasar", "icon": "🌆", "name": "Денпасар / Юг Бали", "en": "Denpasar Bali", "lat": -8.6705, "lon": 115.2126},
         {"key": "ubud", "icon": "🌿", "name": "Убуд", "en": "Ubud Bali", "lat": -8.5069, "lon": 115.2625},
         {"key": "lombok", "icon": "🏝", "name": "Ломбок", "en": "Lombok", "lat": -8.6524, "lon": 116.3240},
+        {"key": "gili", "icon": "🐢", "name": "Острова Гили", "en": "Gili Islands Indonesia", "lat": -8.3520, "lon": 116.0380},
     ],
     "sg": [
         {"key": "singapore", "icon": "🇸🇬", "name": "Сингапур", "en": "Singapore", "lat": 1.3521, "lon": 103.8198},
@@ -1298,6 +1302,79 @@ def _build_curated_index() -> dict:
 
 CURATED = _build_curated_index()
 
+# Новые направления добавляются цельными наборами. Это не позволяет вывести в
+# меню город, у которого есть лишь название, но нет жилья, мест или еды.
+CURATED.update({
+    ("vn", "ho_chi_minh"): {
+        "attractions": [
+            {"name": "War Remnants Museum", "desc": "Сильный и важный музей о войне во Вьетнаме; оставьте на него несколько часов и будьте готовы к тяжёлым экспозициям.", "cat": "culture"},
+            {"name": "Saigon Central Post Office", "desc": "Историческое почтовое здание рядом с собором Нотр-Дам — удобная точка для прогулки по центральному District 1.", "cat": "culture"},
+            {"name": "Ben Thanh Market", "desc": "Центральный рынок для первой встречи с городом: сувениры, фрукты и уличная еда; цену лучше уточнять заранее.", "cat": "fun"},
+        ],
+        "cafes": [
+            {"name": "The Workshop Coffee", "desc": "Спешелти-кофейня в центре, удобна для передышки во время прогулки по District 1.", "type": "cafe"},
+            {"name": "Banh Mi Huynh Hoa", "desc": "Известная точка бань ми; очередь возможна в пиковое время.", "type": "restaurant"},
+            {"name": "Pho Hoa Pasteur", "desc": "Классический вариант фо в центральной части города.", "type": "restaurant"},
+        ],
+        "hotels": [
+            {"name": "Caravelle Saigon", "stars": 5, "area": "District 1 / Opera"},
+            {"name": "Silverland Ben Thanh", "stars": 4, "area": "District 1 / Ben Thanh"},
+            {"name": "The Hammock Hotel Fine Arts Museum", "stars": 3, "area": "District 1 / Riverside"},
+        ],
+    },
+    ("vn", "hue"): {
+        "attractions": [
+            {"name": "Imperial City of Hue", "desc": "Главный исторический комплекс бывшей императорской столицы: лучше приходить утром, до жары и групп.", "cat": "culture"},
+            {"name": "Tomb of Emperor Khai Dinh", "desc": "Императорская гробница с необычным сочетанием вьетнамской и европейской архитектуры.", "cat": "culture"},
+            {"name": "Perfume River", "desc": "Прогулка у реки Хыонг особенно хороша ближе к закату; отсюда удобно начинать знакомство с городом.", "cat": "nature"},
+        ],
+        "cafes": [
+            {"name": "The One Coffee & Bakery", "desc": "Небольшая кофейня для спокойной паузы после прогулки по цитадели.", "type": "cafe"},
+            {"name": "Madam Thu Restaurant", "desc": "Популярное место, чтобы попробовать центральновьетнамские блюда и бань бео.", "type": "restaurant"},
+            {"name": "Hanh Restaurant", "desc": "Местная кухня в центре: удобно сочетать с прогулкой по вечернему Хюэ.", "type": "restaurant"},
+        ],
+        "hotels": [
+            {"name": "Azerai La Residence Hue", "stars": 5, "area": "Perfume River"},
+            {"name": "Melia Vinpearl Hue", "stars": 5, "area": "City centre"},
+            {"name": "Than Thien Friendly Hotel", "stars": 3, "area": "City centre"},
+        ],
+    },
+    ("vn", "da_lat"): {
+        "attractions": [
+            {"name": "Xuan Huong Lake", "desc": "Озеро в центре Далата для прогулки и первого знакомства с прохладным горным городом.", "cat": "nature"},
+            {"name": "Crazy House", "desc": "Необычный архитектурный комплекс с извилистыми лестницами и видами на город.", "cat": "fun"},
+            {"name": "Datanla Waterfall", "desc": "Водопад рядом с городом; выбирайте формат посещения по погоде и времени в пути.", "cat": "nature"},
+        ],
+        "cafes": [
+            {"name": "An Cafe", "desc": "Кафе с садом и видом, подходит для неспешного утра в Далате.", "type": "cafe"},
+            {"name": "Le Rabelais", "desc": "Ресторан при историческом отеле, вариант для особого ужина.", "type": "restaurant"},
+            {"name": "Banh Mi Xiu Mai", "desc": "Местный завтрак: багет с фрикадельками в томатном соусе.", "type": "restaurant"},
+        ],
+        "hotels": [
+            {"name": "Dalat Palace Heritage Hotel", "stars": 5, "area": "Xuan Huong Lake"},
+            {"name": "Ana Mandara Villas Dalat Resort & Spa", "stars": 5, "area": "Pine hills"},
+            {"name": "Dalat Boutique Hotel", "stars": 3, "area": "City centre"},
+        ],
+    },
+    ("id", "gili"): {
+        "attractions": [
+            {"name": "Gili Trawangan", "desc": "Самый оживлённый остров: больше ресторанов, дайв-центров и вечерней жизни.", "cat": "fun"},
+            {"name": "Gili Air", "desc": "Компромисс между инфраструктурой и спокойствием; подойдёт для расслабленного отдыха и снорклинга.", "cat": "nature"},
+            {"name": "Gili Meno", "desc": "Самый тихий остров из трёх, лучше для уединённого отдыха; инфраструктура заметно скромнее.", "cat": "nature"},
+        ],
+        "cafes": [
+            {"name": "Coffee & Thyme Gili Trawangan", "desc": "Кофейня на Гили-Травангане, удобна для завтрака перед снорклингом или поездкой на лодке.", "type": "cafe"},
+            {"name": "Pituq Waroeng", "desc": "Популярный ресторан на Гили-Травангане с индонезийской кухней.", "type": "restaurant"},
+            {"name": "Mowie's Gili Air", "desc": "Пляжный ресторан на Гили-Эйр; проверяйте текущие часы работы на карте.", "type": "restaurant"},
+        ],
+        "hotels": [
+            {"name": "Karma Reef Gili Meno", "stars": 4, "area": "Gili Meno / beach"},
+            {"name": "PinkCoco Gili Air", "stars": 4, "area": "Gili Air / beach"},
+            {"name": "Gili Teak Resort", "stars": 4, "area": "Gili Trawangan / west coast"},
+        ],
+    },
+})
+
 # ─── Мини-маршруты (2-3 дня) по кураторским данным ─────────────────────────────
 # Собраны только из существующих CURATED_VN / CURATED_ID_SG / CURATED_EG_CN —
 # никаких новых мест, только перегруппировка уже показанных attractions/cafes
@@ -1643,12 +1720,33 @@ def _ru_days_word(n: int) -> str:
 
 def fmt_itinerary(country_code: str, city_key: str) -> str:
     data = ITINERARY_DATA.get((country_code, city_key))
-    if not data:
-        return "😕 Готового маршрута для этого города пока нет."
-
     city = find_city(country_code, city_key)
     if not city:
         return "😕 Город не найден."
+
+    # Новые направления получают компактный маршрут сразу из проверенной
+    # кураторской подборки. Это лучше, чем пустая кнопка до следующего релиза.
+    if not data:
+        guide = CURATED.get((country_code, city_key), {})
+        places = guide.get("attractions", [])
+        food = guide.get("cafes", [])
+        if not places or not food:
+            return "😕 Готового маршрута для этого города пока нет."
+        data = {
+            "days": [
+                {"day": 1, "theme": "Главные места", "stops": [
+                    f"09:30 — {places[0]['name']} — {places[0].get('desc', '')}",
+                    f"13:00 — {food[0]['name']} — {food[0].get('desc', '')}",
+                    f"16:00 — {places[1]['name']} — {places[1].get('desc', '')}",
+                ]},
+                {"day": 2, "theme": "Свой темп и местная кухня", "stops": [
+                    f"10:00 — {places[2]['name']} — {places[2].get('desc', '')}",
+                    f"13:00 — {food[1]['name']} — {food[1].get('desc', '')}",
+                    f"19:00 — {food[2]['name']} — {food[2].get('desc', '')}",
+                ]},
+            ],
+            "stay_area": guide.get("hotels", [{}])[0].get("area", "район рядом с основными точками"),
+        }
 
     _, country_name = COUNTRIES.get(country_code, ("", ""))
     days = data.get("days", [])
