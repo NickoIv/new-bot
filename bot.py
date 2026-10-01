@@ -2392,7 +2392,7 @@ def convert_to_kzt(amount: float, code: str) -> float | None:
 # обычным файлом рядом со скриптом.
 
 def _empty_data():
-    return {"subscribers": [], "sent_hashes": []}
+    return {"subscribers": [], "sent_hashes": [], "trips": {}}
 
 def _normalize_data(raw) -> dict:
     """Приводит данные из хранилища к ожидаемой форме. Без этого один битый
@@ -2402,14 +2402,65 @@ def _normalize_data(raw) -> dict:
         return _empty_data()
     subs = raw.get("subscribers")
     hashes = raw.get("sent_hashes")
+    trips = raw.get("trips")
     data = {
         "subscribers": [s for s in subs if isinstance(s, int)] if isinstance(subs, list) else [],
         "sent_hashes": [h for h in hashes if isinstance(h, str)] if isinstance(hashes, list) else [],
+        "trips": trips if isinstance(trips, dict) else {},
     }
     # Дубликаты в подписчиках означали бы дублирующиеся сообщения в рассылке.
     data["subscribers"] = list(dict.fromkeys(data["subscribers"]))
     data["sent_hashes"] = list(dict.fromkeys(data["sent_hashes"]))
+    data["trips"] = {
+        str(uid): value for uid, value in data["trips"].items()
+        if str(uid).isdigit() and isinstance(value, dict)
+    }
     return data
+
+def save_city_to_trip(uid: int, country_code: str, city_key: str) -> bool:
+    """Saves only a destination identifier, never user messages, contacts or
+    location. The display data remains in the versioned public guide."""
+    data = load_data()
+    trips = data.setdefault("trips", {})
+    if not isinstance(trips, dict):
+        trips = data["trips"] = {}
+    trip = trips.setdefault(str(uid), {"cities": []})
+    if not isinstance(trip, dict):
+        trip = trips[str(uid)] = {"cities": []}
+    cities = trip.setdefault("cities", [])
+    item = {"country": country_code, "city": city_key}
+    if item in cities:
+        return False
+    cities.append(item)
+    trips[str(uid)] = trip
+    save_data(data)
+    return True
+
+def get_trip(uid: int) -> list[dict]:
+    data = load_data()
+    trips = data.get("trips", {})
+    trip = trips.get(str(uid), {}) if isinstance(trips, dict) else {}
+    cities = trip.get("cities", []) if isinstance(trip, dict) else []
+    return [item for item in cities if isinstance(item, dict)]
+
+def fmt_trip(uid: int) -> str:
+    items = get_trip(uid)
+    if not items:
+        return (
+            "🧳 <b>Моя поездка</b>\n\n"
+            "Пока здесь пусто. Открой нужный город и нажми «⭐ Сохранить город».\n\n"
+            "<i>Сохраняются только выбранные направления в хранилище бота; "
+            "личные сообщения и геолокация не собираются.</i>"
+        )
+    lines = []
+    for item in items:
+        code, key = item.get("country"), item.get("city")
+        city = find_city(code, key)
+        if city and code in COUNTRIES:
+            flag, country = COUNTRIES[code]
+            lines.append(f"• {city['icon']} <b>{esc(city['name'])}</b> — {flag} {esc(country)}")
+    body = "\n".join(lines) or "Нет доступных сохранённых направлений."
+    return f"🧳 <b>Моя поездка</b>\n\n{body}\n\nОткрой «📍 Страны», чтобы продолжить планирование."
 
 def _upstash_cmd(*args):
     """Универсальный REST-эндпоинт Upstash: POST списка команд Redis в теле
@@ -2660,7 +2711,7 @@ COUNTRY_SCOPED_LABELS = {
     "📰 Новости страны", "🗺️ Виза", "📶 eSIM", "🧭 Полезное туристу",
     "🆘 Экстренная помощь", "🚕 Транспорт", "💵 Деньги на месте",
     "🗓 Сезонность", "🗣️ Разговорник", "💰 Бюджет поездки",
-    "📅 Маршрут", "🏨 Отели", "🏛 Достопримечательности", "☕ Кафе", "🗺️ Карта города",
+    "📅 Маршрут", "🏨 Отели", "🏛 Достопримечательности", "☕ Кафе", "🗺️ Карта города", "⭐ Сохранить город",
     "⭐ Фильтр по звёздам", "🏖 Фильтр по району", "🔍 Поиск отеля",
     "♻️ Сбросить фильтр", "🔀 Показать другие 30",
 }
@@ -2669,7 +2720,7 @@ COUNTRY_SCOPED_LABELS = {
 
 def main_kb():
     return ReplyKeyboardMarkup(
-        [["📍 Страны"],
+        [["📍 Страны", "🧳 Моя поездка"],
          ["🌴 Все новости", "💱 Курс валют"],
          ["🔔 Рассылка новостей", "ℹ️ О боте"]],
         resize_keyboard=True, is_persistent=True,
@@ -2715,6 +2766,7 @@ def city_kb():
         [["🏨 Отели", "📅 Маршрут"],
          ["🏛 Достопримечательности", "☕ Кафе"],
          ["🗺️ Карта города"],
+         ["⭐ Сохранить город"],
          ["📰 Новости страны", "🗺️ Виза"],
          ["✈️ Рейсы из Алматы", "📶 eSIM"],
          ["🧭 Полезное туристу"],
@@ -2959,6 +3011,12 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🌍 Выбери страну:", reply_markup=countries_kb())
         return
 
+    if text == "🧳 Моя поездка":
+        await update.message.reply_text(
+            await asyncio.to_thread(fmt_trip, chat_id), parse_mode="HTML", reply_markup=main_kb(),
+        )
+        return
+
     # Просмотр по кнопке НЕ помечает новости отправленными: список sent_hashes
     # общий на всех, и раньше первый же пользователь, нажавший «Все новости»,
     # «съедал» их для остальных — следующему приходило «Свежих новостей нет».
@@ -3180,6 +3238,19 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             fmt_city_map(city), parse_mode="HTML", reply_markup=current_kb(state),
             disable_web_page_preview=True,
         )
+        return
+
+    if text == "⭐ Сохранить город" and state.get("country") and state.get("city"):
+        city = find_city(state["country"], state["city"])
+        if not city:
+            await update.message.reply_text("Город не найден. Выбери его заново из главного меню.", reply_markup=main_kb())
+            return
+        saved = await asyncio.to_thread(save_city_to_trip, chat_id, state["country"], state["city"])
+        message = (
+            f"✅ {city['icon']} <b>{esc(city['name'])}</b> добавлен в «Мою поездку»."
+            if saved else f"ℹ️ {city['icon']} <b>{esc(city['name'])}</b> уже есть в «Моей поездке»."
+        )
+        await update.message.reply_text(message, parse_mode="HTML", reply_markup=current_kb(state))
         return
 
     # ── Отели ──
