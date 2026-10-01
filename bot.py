@@ -2030,7 +2030,11 @@ def _stars_str(stars) -> str:
 def fmt_hotels_header(city: dict, country_name: str, count: int, filtered: bool = False) -> str:
     header = f"{city['icon']} <b>Отели — {city['name']}</b> ({country_name})"
     if count:
-        header += f"\n<i>{count} вариантов, от высокой оценки к низкой</i>"
+        header += (
+            f"\n<i>{count} вариантов из кураторской подборки.</i>\n"
+            "<i>Звёздность — категория отеля. Реальные рейтинг, отзывы, цены и наличие "
+            "смотри по ссылкам на карте и в Booking: они меняются ежедневно.</i>"
+        )
     elif filtered:
         header += "\n\n😕 По этому фильтру ничего не нашлось — попробуй другой или сбрось фильтр."
     else:
@@ -2607,6 +2611,25 @@ def fmt_city_card(country_code: str, city: dict) -> str:
         "Выбери, что показать:"
     )
 
+def fmt_city_map(city: dict) -> str:
+    """Даёт только внешние карты: бот не скрапит и не кэширует меняющиеся
+    рейтинги, отзывы или цены, чтобы не создавать ложную актуальность."""
+    title = city.get("en", city["name"])
+    query = urllib.parse.quote(f"{title} tourist attractions")
+    hotels_query = urllib.parse.quote(f"hotels in {title}")
+    lat, lon = city["lat"], city["lon"]
+    google_sights = f"https://www.google.com/maps/search/?api=1&query={query}"
+    google_hotels = f"https://www.google.com/maps/search/?api=1&query={hotels_query}"
+    osm = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=13/{lat}/{lon}"
+    return (
+        f"🗺️ <b>Туристическая карта — {esc(city['name'])}</b>\n\n"
+        f"• <a href=\"{google_sights}\">Google Maps: места и маршруты</a>\n"
+        f"• <a href=\"{google_hotels}\">Google Maps: отели, рейтинг и отзывы</a>\n"
+        f"• <a href=\"{osm}\">OpenStreetMap: подробная карта района</a>\n\n"
+        "<i>Бот не копирует отзывы и цены: они должны открываться в актуальном "
+        "виде у карты или сервиса бронирования.</i>"
+    )
+
 # ─── Навигация: состояние по chat_id ────────────────────────────────────────
 # Reply-кнопки (в отличие от inline) не несут в себе контекст — приходит
 # просто текст "▶️ Ещё 10" без указания, о каком городе речь. Поэтому храним
@@ -2634,7 +2657,7 @@ COUNTRY_SCOPED_LABELS = {
     "📰 Новости страны", "🗺️ Виза", "📶 eSIM", "🧭 Полезное туристу",
     "🆘 Экстренная помощь", "🚕 Транспорт", "💵 Деньги на месте",
     "🗓 Сезонность", "🗣️ Разговорник", "💰 Бюджет поездки",
-    "📅 Маршрут", "🏨 Отели", "🏛 Достопримечательности", "☕ Кафе",
+    "📅 Маршрут", "🏨 Отели", "🏛 Достопримечательности", "☕ Кафе", "🗺️ Карта города",
     "⭐ Фильтр по звёздам", "🏖 Фильтр по району", "🔍 Поиск отеля",
     "♻️ Сбросить фильтр", "🔀 Показать другие 30",
 }
@@ -2688,6 +2711,7 @@ def city_kb():
     return ReplyKeyboardMarkup(
         [["🏨 Отели", "📅 Маршрут"],
          ["🏛 Достопримечательности", "☕ Кафе"],
+         ["🗺️ Карта города"],
          ["📰 Новости страны", "🗺️ Виза"],
          ["✈️ Рейсы из Алматы", "📶 eSIM"],
          ["🧭 Полезное туристу"],
@@ -3141,6 +3165,17 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             fmt_itinerary(state["country"], state["city"]),
             parse_mode="HTML", reply_markup=current_kb(state),
+        )
+        return
+
+    if text == "🗺️ Карта города" and state.get("country") and state.get("city"):
+        city = find_city(state["country"], state["city"])
+        if not city:
+            await update.message.reply_text("Город не найден. Выбери его заново из главного меню.", reply_markup=main_kb())
+            return
+        await update.message.reply_text(
+            fmt_city_map(city), parse_mode="HTML", reply_markup=current_kb(state),
+            disable_web_page_preview=True,
         )
         return
 

@@ -263,6 +263,10 @@ def check_html_safety() -> None:
     for code, cities in bot.CITIES.items():
         for c in cities:
             key = (code, c["key"])
+            city_map = bot.fmt_city_map(c)
+            check_html(f"карта {code}/{c['key']}", city_map)
+            if "Google Maps" not in city_map or "OpenStreetMap" not in city_map:
+                fail(f"карта {code}/{c['key']}: не сформированы обе внешние карты")
             check_html(f"маршрут {code}/{c['key']}", bot.fmt_itinerary(code, c["key"]))
             for h in bot.shuffle_city_hotels(code, c["key"]):
                 check_html(f"отель {key}", bot.fmt_hotel_line(1, h, c.get("en", c["name"])))
