@@ -1,0 +1,24 @@
+# ── Секреты: НИКОГДА не коммитить ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.claude/
+.idea/
+.vscode/
+
+# ── Локальные данные рантайма ────────────────────────────────────────────────
+sea_bot_data.json
+hotels.db
+*.db
+*.sqlite3
+sea_travel_bot_avatar.jpg
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
