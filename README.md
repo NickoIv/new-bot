@@ -82,6 +82,8 @@ python bot.py
 | `WEBHOOK_MODE` | нет | `1` — поднять HTTP-сервер вместо polling |
 | `PORT` | нет | порт HTTP-сервера, по умолчанию `8080` |
 | `DAILY_CRON_SECRET` | **на публичном хостинге — да** | защита `POST /cron/daily` (заголовок `X-Cron-Secret`) |
+| `WEBHOOK_PATH_SECRET` | **в webhook-режиме — да** | случайный путь webhook; токен бота в URL не используется |
+| `TELEGRAM_WEBHOOK_SECRET` | **в webhook-режиме — да** | Telegram передаёт его в проверяемом заголовке webhook |
 | `UPSTASH_REDIS_REST_URL` / `..._TOKEN` | нет | внешнее хранилище подписок; без них данные лежат в файле и теряются при перезапуске контейнера |
 | `UPSTASH_REDIS_KEY` | нет | ключ данных в Redis; по умолчанию `new_bot_data`, чтобы не смешать этот экземпляр с исходным |
 | `DATA_FILE` | нет | путь к файлу данных (по умолчанию — рядом с `bot.py`) |
@@ -94,9 +96,14 @@ python bot.py
 
 1. Собери и запусти сервис (Docker или `web: python bot.py`).
 2. Задай переменные `BOT_TOKEN` и `DAILY_CRON_SECRET`.
-3. Пропиши вебхук (токен подставь свой):
+3. Сгенерируй две разные секретные строки для `WEBHOOK_PATH_SECRET` и
+   `TELEGRAM_WEBHOOK_SECRET`, затем пропиши webhook. В URL передаётся только
+   путь-секрет, а не токен бота:
    ```
-   curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook?url=https://<домен>/webhook/<ТОКЕН>&drop_pending_updates=true"
+   curl -F "url=https://<домен>/webhook/<WEBHOOK_PATH_SECRET>" \\
+        -F "secret_token=<TELEGRAM_WEBHOOK_SECRET>" \\
+        -F "drop_pending_updates=true" \\
+        "https://api.telegram.org/bot<ТОКЕН>/setWebhook"
    ```
 4. Ежедневную рассылку дёргает внешний крон (например, cron-job.org):
    ```

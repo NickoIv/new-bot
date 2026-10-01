@@ -5,6 +5,7 @@ import logging
 import os
 import json
 import hashlib
+import hmac
 import html
 import random
 import urllib.request
@@ -39,6 +40,8 @@ MAX_NEWS = 8
 # прописывает свою переменную) бот работает как раньше, локальным polling'ом.
 WEBHOOK_MODE = bool(os.getenv("WEBHOOK_MODE") or os.getenv("RENDER") or os.getenv("K_SERVICE"))
 DAILY_CRON_SECRET = os.getenv("DAILY_CRON_SECRET", "")
+WEBHOOK_PATH_SECRET = os.getenv("WEBHOOK_PATH_SECRET", "")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 PORT = int(os.getenv("PORT", "8080"))
 
 # ── Хранилище: Upstash Redis (бесплатно, без карты, REST API) ──────────────
@@ -3545,7 +3548,10 @@ def run_webhook_mode():
     from aiohttp import web
 
     app = build_app()
-    webhook_path = f"/webhook/{BOT_TOKEN}"
+    # Never place BOT_TOKEN in a public URL: reverse-proxy/request logs can be
+    # retained outside our control. Telegram additionally signs every delivery
+    # with the secret-token header configured through setWebhook.
+    webhook_path = f"/webhook/{WEBHOOK_PATH_SECRET}"
 
     if not DAILY_CRON_SECRET:
         log.warning(
@@ -3555,13 +3561,17 @@ def run_webhook_mode():
         )
 
     async def handle_webhook(request: web.Request):
+        supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(supplied, TELEGRAM_WEBHOOK_SECRET):
+            return web.Response(status=403, text="forbidden")
         data = await request.json()
         update = Update.de_json(data, app.bot)
         await app.update_queue.put(update)
         return web.Response(status=200)
 
     async def handle_cron(request: web.Request):
-        if DAILY_CRON_SECRET and request.headers.get("X-Cron-Secret") != DAILY_CRON_SECRET:
+        supplied = request.headers.get("X-Cron-Secret", "")
+        if DAILY_CRON_SECRET and not hmac.compare_digest(supplied, DAILY_CRON_SECRET):
             return web.Response(status=403, text="forbidden")
         # Сборка новостей + перевод каждой через Google Translate может занять
         # больше 30 сек — это дольше таймаута большинства внешних крон-сервисов
@@ -3603,6 +3613,12 @@ def main():
         raise SystemExit(1)
     if not re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{30,}", BOT_TOKEN):
         log.warning("BOT_TOKEN не похож на настоящий токен — возможно, скопирован не целиком.")
+    if WEBHOOK_MODE and (not WEBHOOK_PATH_SECRET or not TELEGRAM_WEBHOOK_SECRET):
+        log.error(
+            "WEBHOOK_PATH_SECRET и TELEGRAM_WEBHOOK_SECRET обязательны в webhook-режиме. "
+            "Не используй токен бота в URL webhook."
+        )
+        raise SystemExit(1)
     storage = "Upstash Redis" if (UPSTASH_URL and UPSTASH_TOKEN) else f"локальный файл {DATA_FILE.name}"
     log.info(f"Режим: {'webhook на порту ' + str(PORT) if WEBHOOK_MODE else 'polling'} · хранилище: {storage}")
     if WEBHOOK_MODE:
