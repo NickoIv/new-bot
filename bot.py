@@ -232,6 +232,12 @@ CITIES = {
         {"key": "ubud", "icon": "🌿", "name": "Убуд", "en": "Ubud Bali", "lat": -8.5069, "lon": 115.2625},
         {"key": "lombok", "icon": "🏝", "name": "Ломбок", "en": "Lombok", "lat": -8.6524, "lon": 116.3240},
         {"key": "gili", "icon": "🐢", "name": "Острова Гили", "en": "Gili Islands Indonesia", "lat": -8.3520, "lon": 116.0380},
+        {"key": "kuta", "icon": "🏄", "name": "Кута / Легиан", "en": "Kuta Legian Bali", "lat": -8.7180, "lon": 115.1680},
+        {"key": "seminyak", "icon": "🌅", "name": "Семиньяк", "en": "Seminyak Bali", "lat": -8.6890, "lon": 115.1680},
+        {"key": "canggu", "icon": "🌊", "name": "Чангу", "en": "Canggu Bali", "lat": -8.6478, "lon": 115.1385},
+        {"key": "nusa_dua", "icon": "🏖", "name": "Нуса-Дуа", "en": "Nusa Dua Bali", "lat": -8.8003, "lon": 115.2304},
+        {"key": "uluwatu", "icon": "🪨", "name": "Букит / Улувату", "en": "Uluwatu Bali", "lat": -8.8291, "lon": 115.0849},
+        {"key": "sanur", "icon": "⛵", "name": "Санур", "en": "Sanur Bali", "lat": -8.6936, "lon": 115.2625},
     ],
     "sg": [
         {"key": "singapore", "icon": "🇸🇬", "name": "Сингапур", "en": "Singapore", "lat": 1.3521, "lon": 103.8198},
@@ -1373,6 +1379,41 @@ CURATED.update({
             {"name": "Gili Teak Resort", "stars": 4, "area": "Gili Trawangan / west coast"},
         ],
     },
+})
+
+def _compact_guide(hotels, sights, food):
+    """Compact, reviewable source format for district guides."""
+    return {
+        "hotels": [{"name": n, "stars": s, "area": a} for n, s, a in hotels],
+        "attractions": [{"name": n, "desc": d, "cat": c} for n, d, c in sights],
+        "cafes": [{"name": n, "desc": d, "type": t} for n, d, t in food],
+    }
+
+CURATED.update({
+    ("id", "kuta"): _compact_guide(
+        [("The Stones Hotel - Legian Bali", 5, "Legian / beach"), ("The Magani Hotel and Spa", 5, "Legian"), ("The Kuta Beach Heritage Hotel", 5, "Kuta / beach")],
+        [("Kuta Beach", "Пляж с закатами и уроками сёрфинга; район оживлённый и подходит не для тихого отдыха.", "nature"), ("Waterbom Bali", "Крупный аквапарк, удобный вариант для семейного дня.", "fun"), ("Legian Beach", "Длинный пляж между Кутой и Семиньяком для заката и прогулки.", "nature")],
+        [("Crumb & Coaster", "Кофейня и завтрак в Куте.", "cafe"), ("Warung Indonesia", "Простой недорогой варунг с индонезийской кухней.", "restaurant"), ("Fat Chow", "Популярный азиатский ресторан в центре Куты.", "restaurant")]),
+    ("id", "seminyak"): _compact_guide(
+        [("Hotel Indigo Bali Seminyak Beach", 5, "Seminyak / beach"), ("W Bali - Seminyak", 5, "Seminyak / beach"), ("Koa D Surfer Hotel", 3, "Seminyak")],
+        [("Seminyak Beach", "Широкий пляж для закатов; волны могут быть сильными.", "nature"), ("Petitenget Temple", "Балийский храм рядом с пляжной частью района.", "culture"), ("Seminyak Village", "Небольшой торговый центр и точка для прогулки в центре района.", "fun")],
+        [("Revolver Espresso", "Известная кофейня для завтрака.", "cafe"), ("Sisterfields", "Популярное место для бранча.", "restaurant"), ("Warung Nia", "Индонезийская кухня в Семиньяке.", "restaurant")]),
+    ("id", "canggu"): _compact_guide(
+        [("COMO Uma Canggu", 5, "Echo Beach"), ("The Slow", 5, "Batu Bolong"), ("Eastin Ashta Resort Canggu", 4, "Batu Bolong")],
+        [("Batu Bolong Beach", "Главный пляж района для сёрфинга и заката.", "nature"), ("Tanah Lot", "Морской храм; ехать лучше ближе к закату с запасом времени на трафик.", "culture"), ("Echo Beach", "Пляж и сёрф-споты на западе Чангу.", "nature")],
+        [("The Shady Shack", "Кафе с растительным меню.", "cafe"), ("Crate Cafe", "Популярное место для завтрака.", "restaurant"), ("Warung Bu Mi", "Недорогой индонезийский формат.", "restaurant")]),
+    ("id", "nusa_dua"): _compact_guide(
+        [("The St. Regis Bali Resort", 5, "Nusa Dua / beach"), ("The Westin Resort Nusa Dua", 5, "Nusa Dua / beach"), ("Courtyard by Marriott Bali Nusa Dua", 5, "Nusa Dua")],
+        [("Nusa Dua Beach", "Спокойная курортная зона с отелями и ухоженными пляжами.", "nature"), ("Water Blow", "Смотровая точка, где волны бьются о скалы; соблюдайте ограждения.", "nature"), ("Museum Pasifika", "Небольшой музей азиатско-тихоокеанского искусства.", "culture")],
+        [("Nusa by/Suka", "Кафе в курортной зоне.", "cafe"), ("Bumbu Bali", "Балийская кухня в Беноа.", "restaurant"), ("Pirate Bay Bali", "Семейный ресторан у пляжа.", "restaurant")]),
+    ("id", "uluwatu"): _compact_guide(
+        [("Alila Villas Uluwatu", 5, "Uluwatu / cliff"), ("Anantara Uluwatu Bali Resort", 5, "Uluwatu / cliff"), ("Gravity Eco Boutique Hotel", 4, "Uluwatu")],
+        [("Uluwatu Temple", "Храм на скале; обезьяны могут забирать очки и вещи, держите их при себе.", "culture"), ("Padang Padang Beach", "Небольшой живописный пляж со спуском по лестнице.", "nature"), ("Bingin Beach", "Сёрф-пляж и закатная точка с крутым спуском.", "nature")],
+        [("Suka Espresso", "Кофе и завтрак в Улувату.", "cafe"), ("Single Fin", "Закатная площадка; брони и график проверяйте на карте.", "restaurant"), ("The Cashew Tree", "Кафе с завтраками в районе Букит.", "restaurant")]),
+    ("id", "sanur"): _compact_guide(
+        [("Andaz Bali", 5, "Sanur / beach"), ("Hyatt Regency Bali", 5, "Sanur / beach"), ("Akana Boutique Hotel", 4, "Sanur")],
+        [("Sanur Beach", "Спокойный пляж и длинная набережная, удобны для семейного отдыха.", "nature"), ("Sindhu Night Market", "Вечерний рынок с простой местной едой.", "fun"), ("Le Mayeur Museum", "Небольшой музей рядом с пляжем Санура.", "culture")],
+        [("Kopi Kiosk", "Кофе и завтрак на главной улице Санура.", "cafe"), ("Warung Little Bird", "Недорогая индонезийская кухня.", "restaurant"), ("Soul in a Bowl", "Завтраки и лёгкие блюда.", "restaurant")]),
 })
 
 # ─── Мини-маршруты (2-3 дня) по кураторским данным ─────────────────────────────
