@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: new-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: WEBHOOK_MODE
+        value: "1"
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_PATH_SECRET
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: DAILY_CRON_SECRET
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: UPSTASH_REDIS_KEY
+        value: new_bot_data
