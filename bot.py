@@ -54,6 +54,10 @@ UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 UPSTASH_KEY = os.getenv("UPSTASH_REDIS_KEY", "new_bot_data")
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
+# ``httpx`` logs full request URLs at INFO level.  Telegram embeds the bot
+# token in its API URL, so keep this dependency's transport logs out of
+# application/hosting logs while retaining our own operational messages.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 # ─── Безопасная вставка текста в HTML-сообщения ──────────────────────────────
