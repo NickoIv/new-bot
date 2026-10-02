@@ -28,7 +28,7 @@ from telegram.ext import (
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-BOT_DISPLAY_NAME = "New Bot"
+BOT_DISPLAY_NAME = "Sea Travel New"
 # Файл данных — рядом со скриптом, а не относительно текущего каталога: иначе
 # запуск `python /путь/к/bot.py` из другого каталога создавал бы второй,
 # пустой файл и все подписки «терялись». Можно переопределить через env.
