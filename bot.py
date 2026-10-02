@@ -185,6 +185,14 @@ TOURISM_TOPIC_KEYWORDS = [
     "hotel", "resort", "beach", "destination", "vacation", "holiday", "cruise",
     "sightseeing", "backpack", "itinerary", "visitor", "attraction",
 ]
+NEWS_ALERT_CATEGORIES = {
+    "Въезд и документы": ["visa", "e-visa", "entry", "arrival card", "immigration", "passport", "border"],
+    "Рейсы и аэропорты": ["flight", "airline", "airport", "route", "terminal", "airfare", "aviation"],
+    "Погода и природа": ["typhoon", "storm", "flood", "rainfall", "weather alert", "volcano", "earthquake", "haze"],
+    "Транспорт и доступ": ["ferry", "boat", "train", "road", "closure", "closed", "transport", "delay", "cancelled"],
+    "Безопасность": ["safety", "warning", "advisory", "scam", "emergency", "health alert"],
+}
+NEWS_MAX_AGE_DAYS = 14
 ALL_KEYWORDS = COUNTRY_KEYWORDS["vn"] + COUNTRY_KEYWORDS["id"] + COUNTRY_KEYWORDS["sg"] + COUNTRY_KEYWORDS["eg"] + COUNTRY_KEYWORDS["cn"] + COUNTRY_KEYWORDS["th"] + TOURISM_TOPIC_KEYWORDS
 
 # Таймзоны для отображения локального времени — единая на страну (все города
@@ -2737,6 +2745,16 @@ def is_relevant(entry, country=None):
         return any(kw in text for kw in TOURISM_TOPIC_KEYWORDS)
     return any(kw in text for kw in ALL_KEYWORDS)
 
+def classify_travel_news(entry) -> tuple[int, str]:
+    """Ranks actionable travel alerts above generic destination stories.
+    This is intentionally keyword-based and transparent: it never claims an
+    editorial fact that is not in the linked original publication."""
+    text = (entry.get("title", "") + " " + entry.get("summary", "")).lower()
+    for label, words in NEWS_ALERT_CATEGORIES.items():
+        if any(word in text for word in words):
+            return 2, label
+    return 1, "Новости для путешественников"
+
 FEED_USER_AGENT = "sea-travel-bot/1.0 (+https://github.com/NickoIv/sea-travel-bot)"
 RSS_FETCH_TIMEOUT_S = 12
 TRANSLATE_WORKERS = 6
@@ -2793,10 +2811,11 @@ def fetch_news(limit=MAX_NEWS, country=None):
             pub_dt, published = None, ""
             if getattr(entry, "published_parsed", None):
                 pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-                if (now - pub_dt).days > 30:
+                if (now - pub_dt).days > NEWS_MAX_AGE_DAYS:
                     continue
                 published = _ru_short_date(pub_dt.astimezone(ALMATY_TZ))
             seen.add(h)
+            priority, category = classify_travel_news(entry)
             candidates.append({
                 "hash": h,
                 "title": entry.get("title", ""),
@@ -2806,10 +2825,14 @@ def fetch_news(limit=MAX_NEWS, country=None):
                 "flag": feed_cfg["flag"],
                 "published": published,
                 "pub_dt": pub_dt,
+                "priority": priority,
+                "category": category,
             })
 
-    candidates.sort(key=lambda x: x["pub_dt"] or datetime.min.replace(tzinfo=timezone.utc),
-                    reverse=True)
+    candidates.sort(
+        key=lambda x: (x["priority"], x["pub_dt"] or datetime.min.replace(tzinfo=timezone.utc)),
+        reverse=True,
+    )
     # Переводим только то, что реально уйдёт в сообщение (после отсечки по limit).
     candidates = candidates[:limit]
     translations = _translate_many(
@@ -2820,6 +2843,7 @@ def fetch_news(limit=MAX_NEWS, country=None):
         c["title"] = title_ru or c["title"] or "Без заголовка"
         c["summary"] = summary_ru or ""
         c.pop("pub_dt", None)
+        c.pop("priority", None)
     return candidates
 
 def fmt_item(item, i):
@@ -2832,9 +2856,12 @@ def fmt_item(item, i):
     date = f"  •  {esc(item['published'])}" if item.get("published") else ""
     link = safe_link(item.get("link", ""))
     link_line = f"\n<a href=\"{link}\">Читать →</a>" if link else ""
+    category = item.get("category")
+    category_line = f"\n<i>{esc(category)}</i>" if category else ""
     return (
         f"{item.get('flag', '')} <b>{i}. {esc(item.get('title') or 'Без заголовка')}</b>\n"
         f"<code>{esc(item.get('source', ''))}{date}</code>"
+        f"{category_line}"
         f"{summary}"
         f"{link_line}"
     )
