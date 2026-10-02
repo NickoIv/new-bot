@@ -175,6 +175,7 @@ COUNTRY_KEYWORDS = {
     "sg": ["singapore","sentosa","changi"],
     "eg": ["egypt","cairo","luxor","aswan","hurghada","sharm el sheikh","alexandria","giza","pyramids","red sea","nile"],
     "cn": ["china","hainan","sanya","haikou"],
+    "th": ["thailand","bangkok","phuket","krabi","ao nang","koh samui","chiang mai","thai"],
 }
 # Общие "туристические" слова — отдельно от топонимов. Упоминание одного лишь
 # города/страны в новости ещё не значит, что новость про туризм (могла быть
@@ -184,7 +185,7 @@ TOURISM_TOPIC_KEYWORDS = [
     "hotel", "resort", "beach", "destination", "vacation", "holiday", "cruise",
     "sightseeing", "backpack", "itinerary", "visitor", "attraction",
 ]
-ALL_KEYWORDS = COUNTRY_KEYWORDS["vn"] + COUNTRY_KEYWORDS["id"] + COUNTRY_KEYWORDS["sg"] + COUNTRY_KEYWORDS["eg"] + COUNTRY_KEYWORDS["cn"] + TOURISM_TOPIC_KEYWORDS
+ALL_KEYWORDS = COUNTRY_KEYWORDS["vn"] + COUNTRY_KEYWORDS["id"] + COUNTRY_KEYWORDS["sg"] + COUNTRY_KEYWORDS["eg"] + COUNTRY_KEYWORDS["cn"] + COUNTRY_KEYWORDS["th"] + TOURISM_TOPIC_KEYWORDS
 
 # Таймзоны для отображения локального времени — единая на страну (все города
 # каждой страны здесь лежат в одном часовом поясе, отдельная таблица не нужна)
@@ -194,6 +195,7 @@ TIMEZONES = {
     "sg": "Asia/Singapore",
     "eg": "Africa/Cairo",
     "cn": "Asia/Shanghai",
+    "th": "Asia/Bangkok",
 }
 
 # Флаги и названия стран — используется в меню "Страны" и в подписях разделов
@@ -203,6 +205,7 @@ COUNTRIES = {
     "sg": ("🇸🇬", "Сингапур"),
     "eg": ("🇪🇬", "Египет"),
     "cn": ("🇨🇳", "Китай"),
+    "th": ("🇹🇭", "Таиланд"),
 }
 
 def local_time_str(country_code: str) -> str:
@@ -250,6 +253,13 @@ CITIES = {
     ],
     "cn": [
         {"key": "hainan", "icon": "🏝", "name": "Хайнань (Санья)", "en": "Sanya Hainan", "lat": 18.2528, "lon": 109.5119},
+    ],
+    "th": [
+        {"key": "bangkok", "icon": "🏙", "name": "Бангкок", "en": "Bangkok Thailand", "lat": 13.7563, "lon": 100.5018},
+        {"key": "phuket", "icon": "🏝", "name": "Пхукет", "en": "Phuket Thailand", "lat": 7.8804, "lon": 98.3923},
+        {"key": "krabi", "icon": "🛶", "name": "Краби / Ао Нанг", "en": "Ao Nang Krabi Thailand", "lat": 8.0359, "lon": 98.8206},
+        {"key": "samui", "icon": "🌴", "name": "Самуи", "en": "Koh Samui Thailand", "lat": 9.5120, "lon": 100.0136},
+        {"key": "chiang_mai", "icon": "🏯", "name": "Чиангмай", "en": "Chiang Mai Thailand", "lat": 18.7883, "lon": 98.9853},
     ],
 }
 
@@ -820,7 +830,35 @@ ESIM_LINKS = {
     "sg": "https://www.airalo.com/singapore-esim",
     "eg": "https://www.airalo.com/egypt-esim",
     "cn": "https://www.airalo.com/china-esim",
+    "th": "https://www.airalo.com/thailand-esim",
 }
+
+# Thailand is deliberately conservative: entry rules change, so the bot links
+# to the official immigration source instead of presenting a static visa claim.
+VISA_INFO["th"] = (
+    "🇹🇭 <b>Таиланд — въезд и виза</b>\n\n"
+    "Требования зависят от гражданства, цели и длительности поездки и могут меняться. "
+    "Перед покупкой билетов проверь официальный сервис Thai e-Visa и требования авиакомпании.\n\n"
+    "• <a href=\"https://www.thaievisa.go.th/\">Thai e-Visa — официальный портал</a>\n"
+    "• <a href=\"https://www.immigration.go.th/\">Immigration Bureau Thailand</a>\n\n"
+    "<i>Не передавай паспортные данные или номер брони этому боту; оформление выполняется только на официальных сайтах.</i>"
+)
+TRANSPORT_INFO_DATA["th"] = {
+    "apps": "В Бангкоке и туристических районах обычно используют Grab и Bolt; перед посадкой сверяй имя водителя, номер машины и цену в приложении.",
+    "airport": "В Бангкоке до города есть Airport Rail Link, официальная очередь такси и заказ через приложение. На островах и курортах заранее проверяй трансфер и расписание паромов.",
+    "local_ride": "Для коротких перемещений выбирай общественный транспорт, официальное такси по счётчику или поездку, заказанную в приложении.",
+    "warning": "Не соглашайся на поездку без заранее понятной цены или включённого счётчика. На островах проверяй время последнего парома и условия отмены из-за погоды.",
+}
+MONEY_INFO_DATA["th"] = {
+    "exchange": "Меняй деньги в банках или лицензированных обменниках; сохраняй чек до конца операции.",
+    "atm": "Банкоматы широко распространены; до снятия денег проверь комиссию на экране и откажись от конвертации в валюту карты (DCC), если курс невыгоден.",
+    "cards": "В отелях и крупных заведениях карты распространены, но рынки, небольшие кафе и острова часто требуют наличные.",
+    "tipping": "Чаевые не обязательны, но небольшая сумма за хороший сервис уместна; сначала проверь, не добавлен ли service charge.",
+}
+SAFETY_INFO_DATA["th"] = {"emergency": "Туристическая полиция: 1155; полиция: 191; скорая: 1669.", "embassy": "Проверяй актуальные контакты и запись только на официальном сайте МИД Казахстана перед поездкой.", "scams": ["Сверяй цену до покупки экскурсии, поездки или аренды.", "Не передавай паспорт как залог без понятного договора.", "Не соглашайся на такси без включённого счётчика или цены в приложении."]}
+SEASON_INFO_DATA["th"] = {"best_months": "Для Бангкока и Чиангмая обычно комфортнее прохладный сухой период, а для островов сезон зависит от побережья.", "avoid": "В период сильных дождей и волн морские маршруты могут отменяться; перед поездкой на острова проверяй прогноз.", "temp_range": "В большинстве туристических районов жарко круглый год; влажность и ливни важнее разницы температур.", "rainy_season": "Муссонные периоды различаются между Андаманским морем и Сиамским заливом.", "regional_note": "Для Пхукета/Краби и Самуи нельзя применять один и тот же сезонный календарь; смотри прогноз именно для выбранного побережья.", "crowds": "Праздники и высокий сухой сезон повышают цены на жильё и нагрузку на транспорт."}
+BUDGET_INFO_DATA["th"] = {"context": "Бангкок и Чиангмай обычно гибче по цене, популярные пляжные районы и праздники заметно дороже.", "economy": {"range": (30, 55), "note": "Гестхаус, уличная еда, локальный транспорт и недорогие активности."}, "mid": {"range": (80, 150), "note": "Отель среднего уровня, рестораны, приложения такси и одна платная активность."}, "premium": {"range": (220, 450), "note": "Курорт или 5★ отель, приватные трансферы и премиальные экскурсии."}}
+PHRASEBOOK_DATA["th"] = [("Здравствуйте", "สวัสดี", "савади"), ("Спасибо", "ขอบคุณ", "кхоп кхун"), ("Сколько стоит?", "เท่าไหร่", "тау рай?"), ("Не остро, пожалуйста", "ไม่เผ็ด", "май пхет"), ("Помогите", "ช่วยด้วย", "чуай дуай")]
 
 def fmt_esim_info(country_code: str) -> str:
     _, name = COUNTRIES.get(country_code, ("", "?"))
@@ -1390,6 +1428,11 @@ def _compact_guide(hotels, sights, food):
     }
 
 CURATED.update({
+    ("th", "bangkok"): _compact_guide([("The Siam", 5, "Riverside"), ("Eastin Grand Hotel Sathorn", 5, "Sathorn / BTS"), ("Casa Nithra Bangkok", 4, "Old Town")], [("Grand Palace", "Главный исторический комплекс; проверяй правила одежды и часы работы.", "culture"), ("Wat Arun", "Храм на реке Чао Прайя, особенно красивый ближе к закату.", "culture"), ("Chatuchak Weekend Market", "Крупный рынок выходного дня; планируй время и воду.", "fun")], [("Roots at Sathon", "Кофе в деловом районе.", "cafe"), ("Thip Samai", "Популярный пад-тай; очередь возможна.", "restaurant"), ("Krua Apsorn", "Тайская кухня в центре.", "restaurant")]),
+    ("th", "phuket"): _compact_guide([("The Surin Phuket", 5, "Surin Beach"), ("Novotel Phuket Kata Avista Resort", 5, "Kata"), ("The Memory at On On Hotel", 3, "Phuket Old Town")], [("Phuket Old Town", "Красочные исторические улицы, кафе и рынки.", "culture"), ("Kata Beach", "Популярный пляж; условия моря проверяй по сезону.", "nature"), ("Big Buddha Phuket", "Смотровая точка; доступность может меняться, проверяй карту перед выездом.", "culture")], [("Ryn - Authentic Tea & Slow Drop Coffee", "Кофе в Старом городе.", "cafe"), ("One Chun Cafe & Restaurant", "Южнотайская кухня.", "restaurant"), ("Tu Kab Khao", "Ресторан в Phuket Old Town.", "restaurant")]),
+    ("th", "krabi"): _compact_guide([("Rayavadee", 5, "Railay"), ("Centara Ao Nang Beach Resort", 4, "Ao Nang / beach"), ("Panan Krabi Resort", 4, "Ao Nang")], [("Railay Beach", "Пляж и скалы, куда добираются на лодке.", "nature"), ("Tiger Cave Temple", "Храм и смотровая точка; подъём требует подготовки.", "culture"), ("Ao Nang Beach", "База для морских экскурсий; следи за погодой и расписанием лодок.", "nature")], [("Cafe 8.98", "Завтраки в Ао Нанге.", "cafe"), ("Jungle Kitchen", "Тайская кухня.", "restaurant"), ("Kodam Kitchen", "Местный ресторан в Ао Нанге.", "restaurant")]),
+    ("th", "samui"): _compact_guide([("Four Seasons Resort Koh Samui", 5, "Mae Nam"), ("Anantara Bophut Koh Samui Resort", 5, "Bophut"), ("Lub d Koh Samui Chaweng Beach", 3, "Chaweng")], [("Fisherman's Village", "Вечерняя прогулка, рестораны и рынок в Бопхуте.", "fun"), ("Big Buddha Temple", "Заметная храмовая точка на северо-востоке острова.", "culture"), ("Lamai Beach", "Пляжный район с более спокойным ритмом, чем часть Чавенга.", "nature")], [("The Coffee Club", "Завтрак у Fisherman's Village.", "cafe"), ("Coco Tam's", "Пляжный ресторан в Бопхуте.", "restaurant"), ("The Hungry Wolf", "Неформальный ужин в Чавенге.", "restaurant")]),
+    ("th", "chiang_mai"): _compact_guide([("137 Pillars House", 5, "Wat Gate"), ("Melia Chiang Mai", 5, "Night Bazaar"), ("POR Thapae Gate", 3, "Old City")], [("Wat Phra That Doi Suthep", "Главный храм на горе; рассчитывай время на дорогу и погоду.", "culture"), ("Chiang Mai Old City", "Храмы и прогулки внутри старого города.", "culture"), ("Warorot Market", "Рынок для местной еды и товаров.", "fun")], [("Akha Ama Coffee", "Спешелти-кофе с северотайским контекстом.", "cafe"), ("Khao Soi Khun Yai", "Северотайский khao soi; график проверяй на карте.", "restaurant"), ("Huen Muan Jai", "Северотайская кухня.", "restaurant")]),
     ("id", "kuta"): _compact_guide(
         [("The Stones Hotel - Legian Bali", 5, "Legian / beach"), ("The Magani Hotel and Spa", 5, "Legian"), ("The Kuta Beach Heritage Hotel", 5, "Kuta / beach")],
         [("Kuta Beach", "Пляж с закатами и уроками сёрфинга; район оживлённый и подходит не для тихого отдыха.", "nature"), ("Waterbom Bali", "Крупный аквапарк, удобный вариант для семейного дня.", "fun"), ("Legian Beach", "Длинный пляж между Кутой и Семиньяком для заката и прогулки.", "nature")],
@@ -2463,6 +2506,7 @@ CURRENCIES = {
     "sgd": ("🇸🇬", "SGD", "сингапурский доллар"),
     "cny": ("🇨🇳", "CNY", "юань"),
     "egp": ("🇪🇬", "EGP", "египетский фунт"),
+    "thb": ("🇹🇭", "THB", "тайский бат"),
     "usd": ("🇺🇸", "USD", "доллар США"),
     "eur": ("🇪🇺", "EUR", "евро"),
 }
