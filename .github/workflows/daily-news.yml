@@ -1,0 +1,37 @@
+name: Daily news digest
+
+on:
+  schedule:
+    # Asia/Almaty is UTC+5 year-round: 05:00 UTC = 10:00 Almaty.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-news-digest
+  cancel-in-progress: false
+
+jobs:
+  trigger-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger protected digest endpoint
+        env:
+          DAILY_CRON_SECRET: ${{ secrets.DAILY_CRON_SECRET }}
+          DIGEST_URL: https://new-bot-ig34.onrender.com/cron/daily
+        run: |
+          test -n "$DAILY_CRON_SECRET"
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 2 \
+            --retry-all-errors \
+            --retry-delay 20 \
+            --max-time 120 \
+            --request POST \
+            --header "X-Cron-Secret: $DAILY_CRON_SECRET" \
+            "$DIGEST_URL"
