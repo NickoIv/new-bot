@@ -132,6 +132,58 @@ def check_data() -> None:
         fail(f"одинаковые подписи городов в разных странах: {dupes}")
 
 
+def check_runtime_security() -> None:
+    original = (
+        bot.WEBHOOK_MODE,
+        bot.BOT_TOKEN,
+        bot.WEBHOOK_PATH_SECRET,
+        bot.TELEGRAM_WEBHOOK_SECRET,
+        bot.DAILY_CRON_SECRET,
+    )
+    try:
+        bot.WEBHOOK_MODE = True
+        bot.BOT_TOKEN = "123456:" + "T" * 40
+        bot.WEBHOOK_PATH_SECRET = "P" * 40
+        bot.TELEGRAM_WEBHOOK_SECRET = "W" * 40
+        bot.DAILY_CRON_SECRET = "C" * 40
+        if bot.runtime_security_errors():
+            fail("валидная webhook-конфигурация ошибочно отклонена")
+
+        bot.DAILY_CRON_SECRET = ""
+        if not any("DAILY_CRON_SECRET" in e for e in bot.runtime_security_errors()):
+            fail("webhook-режим допускает публичный /cron/daily без секрета")
+
+        bot.DAILY_CRON_SECRET = "short"
+        if not any("слишком короткий" in e for e in bot.runtime_security_errors()):
+            fail("короткий cron-секрет не отклоняется")
+
+        bot.DAILY_CRON_SECRET = "C" * 39 + "!"
+        if not any("недопустимые символы" in e for e in bot.runtime_security_errors()):
+            fail("cron-секрет с недопустимыми символами не отклоняется")
+
+        bot.DAILY_CRON_SECRET = bot.TELEGRAM_WEBHOOK_SECRET
+        if not any("разные значения" in e for e in bot.runtime_security_errors()):
+            fail("одинаковые webhook/cron-секреты не отклоняются")
+    finally:
+        (
+            bot.WEBHOOK_MODE,
+            bot.BOT_TOKEN,
+            bot.WEBHOOK_PATH_SECRET,
+            bot.TELEGRAM_WEBHOOK_SECRET,
+            bot.DAILY_CRON_SECRET,
+        ) = original
+
+    valid = {"update_id": 1, "message": {"text": "/start"}}
+    if not bot.valid_telegram_update_payload(valid):
+        fail("валидный Telegram Update ошибочно отклонён")
+    for invalid in (None, [], {}, {"update_id": "1"}, {"update_id": True}):
+        if bot.valid_telegram_update_payload(invalid):
+            fail(f"некорректный Telegram Update принят: {invalid!r}")
+
+    if bot.WEBHOOK_MAX_BODY_BYTES > 256 * 1024:
+        fail("лимит тела webhook неожиданно превышает 256 KiB")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. HTML-безопасность
 # ═════════════════════════════════════════════════════════════════════════════
@@ -434,6 +486,7 @@ def main() -> int:
     go_offline()
     groups = [
         ("Целостность данных", check_data),
+        ("Security-конфигурация webhook и cron", check_runtime_security),
         ("Сборка приложения и регистрация обработчиков", check_app_wiring),
         ("HTML-безопасность сообщений", check_html_safety),
         ("Разбивка длинных сообщений", check_long_messages),

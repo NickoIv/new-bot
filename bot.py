@@ -43,6 +43,9 @@ DAILY_CRON_SECRET = os.getenv("DAILY_CRON_SECRET", "")
 WEBHOOK_PATH_SECRET = os.getenv("WEBHOOK_PATH_SECRET", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 PORT = int(os.getenv("PORT", "8080"))
+WEBHOOK_MAX_BODY_BYTES = 256 * 1024
+MIN_RUNTIME_SECRET_LENGTH = 32
+RUNTIME_SECRET_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
 # ── Хранилище: Upstash Redis (бесплатно, без карты, REST API) ──────────────
 # Без карты нельзя использовать Google Cloud Storage — Upstash делает то же
@@ -59,6 +62,45 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=lo
 # application/hosting logs while retaining our own operational messages.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
+
+
+def runtime_security_errors() -> list[str]:
+    """Возвращает ошибки security-конфигурации без вывода значений секретов."""
+    if not WEBHOOK_MODE:
+        return []
+
+    required = {
+        "WEBHOOK_PATH_SECRET": WEBHOOK_PATH_SECRET,
+        "TELEGRAM_WEBHOOK_SECRET": TELEGRAM_WEBHOOK_SECRET,
+        "DAILY_CRON_SECRET": DAILY_CRON_SECRET,
+    }
+    errors = []
+    for name, value in required.items():
+        if not value:
+            errors.append(f"{name} не задан")
+        elif len(value) < MIN_RUNTIME_SECRET_LENGTH:
+            errors.append(
+                f"{name} слишком короткий: требуется минимум "
+                f"{MIN_RUNTIME_SECRET_LENGTH} символа"
+            )
+        elif not RUNTIME_SECRET_PATTERN.fullmatch(value):
+            errors.append(f"{name} содержит недопустимые символы")
+
+    configured = [value for value in required.values() if value]
+    if len(configured) != len(set(configured)):
+        errors.append("секреты webhook и cron должны иметь разные значения")
+    if BOT_TOKEN and BOT_TOKEN in configured:
+        errors.append("BOT_TOKEN нельзя повторно использовать как webhook/cron-секрет")
+    return errors
+
+
+def valid_telegram_update_payload(data) -> bool:
+    """Минимальная структурная проверка официального Telegram Update."""
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("update_id"), int)
+        and not isinstance(data.get("update_id"), bool)
+    )
 
 # ─── Безопасная вставка текста в HTML-сообщения ──────────────────────────────
 # Всё, что приходит извне (заголовки и анонсы RSS, названия объектов из
@@ -3848,31 +3890,36 @@ def run_webhook_mode():
     # with the secret-token header configured through setWebhook.
     webhook_path = f"/webhook/{WEBHOOK_PATH_SECRET}"
 
-    if not DAILY_CRON_SECRET:
-        log.warning(
-            "⚠️ DAILY_CRON_SECRET не задан — эндпоинт POST /cron/daily открыт кому угодно, "
-            "кто знает адрес, и позволяет разослать дайджест подписчикам. "
-            "Задай секрет и передавай его в заголовке X-Cron-Secret."
-        )
-
     async def handle_webhook(request: web.Request):
         supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if not hmac.compare_digest(supplied, TELEGRAM_WEBHOOK_SECRET):
-            return web.Response(status=403, text="forbidden")
-        data = await request.json()
-        update = Update.de_json(data, app.bot)
+            # 404 не подтверждает сканеру существование защищённого маршрута.
+            return web.Response(status=404, text="not found")
+        if request.content_type != "application/json":
+            return web.Response(status=415, text="unsupported media type")
+        try:
+            data = await request.json(loads=json.loads)
+        except (json.JSONDecodeError, web.HTTPBadRequest):
+            return web.Response(status=400, text="invalid json")
+        if not valid_telegram_update_payload(data):
+            return web.Response(status=400, text="invalid update")
+        try:
+            update = Update.de_json(data, app.bot)
+        except (KeyError, TypeError, ValueError):
+            return web.Response(status=400, text="invalid update")
         await app.update_queue.put(update)
         return web.Response(status=200)
 
     async def handle_cron(request: web.Request):
         supplied = request.headers.get("X-Cron-Secret", "")
-        if DAILY_CRON_SECRET and not hmac.compare_digest(supplied, DAILY_CRON_SECRET):
-            return web.Response(status=403, text="forbidden")
+        if not hmac.compare_digest(supplied, DAILY_CRON_SECRET):
+            return web.Response(status=404, text="not found")
         # Сборка новостей + перевод каждой через Google Translate может занять
         # больше 30 сек — это дольше таймаута большинства внешних крон-сервисов
         # (в т.ч. cron-job.org). Поэтому отвечаем сразу, а рассылку запускаем
         # фоновой задачей — cron просто "будит" эндпоинт, не дожидаясь результата.
         asyncio.create_task(_run_digest_once(app.bot))
+        log.info("Защищённый запуск ежедневного дайджеста принят")
         return web.Response(status=200, text="started")
 
     async def handle_health(request: web.Request):
@@ -3881,14 +3928,19 @@ def run_webhook_mode():
     async def run():
         await app.initialize()
         await app.start()
-        web_app = web.Application()
+        # Telegram Update не содержит бинарные файлы: документы и фото приходят
+        # как file_id. Лимит оставляет большой запас обычному Update, но не
+        # позволяет использовать endpoint для загрузки мегабайтного мусора.
+        web_app = web.Application(client_max_size=WEBHOOK_MAX_BODY_BYTES)
         web_app.add_routes([
             web.post(webhook_path, handle_webhook),
             web.post("/cron/daily", handle_cron),
             web.get("/", handle_health),
             web.get("/health", handle_health),
         ])
-        runner = web.AppRunner(web_app)
+        # Стандартный access-log aiohttp пишет полный URL, а значит раскрывает
+        # WEBHOOK_PATH_SECRET. Операционные события логируем сами, без пути.
+        runner = web.AppRunner(web_app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", PORT)
         await site.start()
@@ -3908,11 +3960,10 @@ def main():
         raise SystemExit(1)
     if not re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{30,}", BOT_TOKEN):
         log.warning("BOT_TOKEN не похож на настоящий токен — возможно, скопирован не целиком.")
-    if WEBHOOK_MODE and (not WEBHOOK_PATH_SECRET or not TELEGRAM_WEBHOOK_SECRET):
-        log.error(
-            "WEBHOOK_PATH_SECRET и TELEGRAM_WEBHOOK_SECRET обязательны в webhook-режиме. "
-            "Не используй токен бота в URL webhook."
-        )
+    security_errors = runtime_security_errors()
+    if security_errors:
+        for error in security_errors:
+            log.error("Ошибка security-конфигурации: %s", error)
         raise SystemExit(1)
     storage = "Upstash Redis" if (UPSTASH_URL and UPSTASH_TOKEN) else f"локальный файл {DATA_FILE.name}"
     log.info(f"Режим: {'webhook на порту ' + str(PORT) if WEBHOOK_MODE else 'polling'} · хранилище: {storage}")
