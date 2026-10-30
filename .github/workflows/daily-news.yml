@@ -2,8 +2,9 @@ name: Daily news digest
 
 on:
   schedule:
-    # Asia/Almaty is UTC+5 year-round: 05:00 UTC = 10:00 Almaty.
-    - cron: "0 5 * * *"
+    # Start shortly before the top-of-hour Actions peak, then wait until
+    # 05:00 UTC (10:00 Asia/Almaty) before triggering the digest.
+    - cron: "57 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -16,8 +17,18 @@ concurrency:
 jobs:
   trigger-digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
+      - name: Wait until 10:00 Almaty
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          now="$(date -u +%s)"
+          target="$(date -u -d 'today 05:00:00' +%s)"
+          if (( now < target )); then
+            sleep "$((target - now))"
+          fi
+
       - name: Trigger protected digest endpoint
         env:
           DAILY_CRON_SECRET: ${{ secrets.DAILY_CRON_SECRET }}
