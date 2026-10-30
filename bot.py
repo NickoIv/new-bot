@@ -13,6 +13,7 @@ import urllib.parse
 import re
 import requests
 import time
+from collections import deque
 from pypinyin import pinyin, Style
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, time as dtime, timedelta, timezone
@@ -46,6 +47,7 @@ PORT = int(os.getenv("PORT", "8080"))
 WEBHOOK_MAX_BODY_BYTES = 256 * 1024
 MIN_RUNTIME_SECRET_LENGTH = 32
 RUNTIME_SECRET_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+RECENT_UPDATE_IDS_LIMIT = 4096
 
 # ── Хранилище: Upstash Redis (бесплатно, без карты, REST API) ──────────────
 # Без карты нельзя использовать Google Cloud Storage — Upstash делает то же
@@ -101,6 +103,24 @@ def valid_telegram_update_payload(data) -> bool:
         and isinstance(data.get("update_id"), int)
         and not isinstance(data.get("update_id"), bool)
     )
+
+
+# Telegram повторяет доставку, если не получил подтверждение вовремя. Храним
+# ограниченное окно уже принятых update_id, чтобы повтор не запускал команду
+# или рассылку второй раз и при этом память процесса оставалась ограниченной.
+_recent_update_ids: set[int] = set()
+_recent_update_order: deque[int] = deque()
+
+
+def record_new_update_id(update_id: int) -> bool:
+    """Возвращает False для повтора, True для впервые принятого update_id."""
+    if update_id in _recent_update_ids:
+        return False
+    _recent_update_ids.add(update_id)
+    _recent_update_order.append(update_id)
+    while len(_recent_update_order) > RECENT_UPDATE_IDS_LIMIT:
+        _recent_update_ids.discard(_recent_update_order.popleft())
+    return True
 
 # ─── Безопасная вставка текста в HTML-сообщения ──────────────────────────────
 # Всё, что приходит извне (заголовки и анонсы RSS, названия объектов из
@@ -3881,10 +3901,14 @@ async def _run_digest_once(bot):
     async with _digest_lock:
         await send_daily_digest(bot)
 
-def run_webhook_mode():
+def build_web_app(app: Application):
+    """Собирает HTTP-приложение отдельно от запуска сервера.
+
+    Разделение позволяет проверять реальный HTTP-контур локально, не открывая
+    порт наружу и не подключаясь к Telegram.
+    """
     from aiohttp import web
 
-    app = build_app()
     # Never place BOT_TOKEN in a public URL: reverse-proxy/request logs can be
     # retained outside our control. Telegram additionally signs every delivery
     # with the secret-token header configured through setWebhook.
@@ -3907,6 +3931,10 @@ def run_webhook_mode():
             update = Update.de_json(data, app.bot)
         except (KeyError, TypeError, ValueError):
             return web.Response(status=400, text="invalid update")
+        if not record_new_update_id(update.update_id):
+            # Повтор считается успешно обработанным: иначе Telegram продолжит
+            # присылать его снова, усиливая нагрузку.
+            return web.Response(status=200)
         await app.update_queue.put(update)
         return web.Response(status=200)
 
@@ -3925,19 +3953,28 @@ def run_webhook_mode():
     async def handle_health(request: web.Request):
         return web.Response(status=200, text="ok")
 
+    # Telegram Update не содержит бинарные файлы: документы и фото приходят
+    # как file_id. Лимит оставляет большой запас обычному Update, но не
+    # позволяет использовать endpoint для загрузки мегабайтного мусора.
+    web_app = web.Application(client_max_size=WEBHOOK_MAX_BODY_BYTES)
+    web_app.add_routes([
+        web.post(webhook_path, handle_webhook),
+        web.post("/cron/daily", handle_cron),
+        web.get("/", handle_health),
+        web.get("/health", handle_health),
+    ])
+    return web_app
+
+
+def run_webhook_mode():
+    from aiohttp import web
+
+    app = build_app()
+
     async def run():
         await app.initialize()
         await app.start()
-        # Telegram Update не содержит бинарные файлы: документы и фото приходят
-        # как file_id. Лимит оставляет большой запас обычному Update, но не
-        # позволяет использовать endpoint для загрузки мегабайтного мусора.
-        web_app = web.Application(client_max_size=WEBHOOK_MAX_BODY_BYTES)
-        web_app.add_routes([
-            web.post(webhook_path, handle_webhook),
-            web.post("/cron/daily", handle_cron),
-            web.get("/", handle_health),
-            web.get("/health", handle_health),
-        ])
+        web_app = build_web_app(app)
         # Стандартный access-log aiohttp пишет полный URL, а значит раскрывает
         # WEBHOOK_PATH_SECRET. Операционные события логируем сами, без пути.
         runner = web.AppRunner(web_app, access_log=None)

@@ -182,6 +182,134 @@ def check_runtime_security() -> None:
 
     if bot.WEBHOOK_MAX_BODY_BYTES > 256 * 1024:
         fail("лимит тела webhook неожиданно превышает 256 KiB")
+    if bot.RECENT_UPDATE_IDS_LIMIT > 4096:
+        fail("окно защиты от повторов неожиданно превышает 4096 Update")
+
+
+def check_http_security() -> None:
+    """Проверяет настоящий aiohttp-контур без Telegram и внешней сети."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    class FakeApplication:
+        def __init__(self):
+            self.bot = object()
+            self.update_queue = asyncio.Queue()
+
+    async def run() -> None:
+        original = (
+            bot.WEBHOOK_PATH_SECRET,
+            bot.TELEGRAM_WEBHOOK_SECRET,
+            bot.DAILY_CRON_SECRET,
+            bot._run_digest_once,
+        )
+        fake_app = FakeApplication()
+        digest_started = asyncio.Event()
+
+        async def fake_digest(_telegram_bot):
+            digest_started.set()
+
+        bot.WEBHOOK_PATH_SECRET = "P" * 40
+        bot.TELEGRAM_WEBHOOK_SECRET = "W" * 40
+        bot.DAILY_CRON_SECRET = "C" * 40
+        bot._run_digest_once = fake_digest
+        webhook_path = f"/webhook/{bot.WEBHOOK_PATH_SECRET}"
+        client = TestClient(TestServer(bot.build_web_app(fake_app)))
+        try:
+            await client.start_server()
+            response = await client.get("/health")
+            if response.status != 200 or await response.text() != "ok":
+                fail("health endpoint не отвечает 200/ok")
+
+            response = await client.post(webhook_path, json={"update_id": 1})
+            if response.status != 404:
+                fail("webhook без Telegram secret не маскируется ответом 404")
+
+            response = await client.post(
+                webhook_path,
+                json={"update_id": 1},
+                headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
+            )
+            if response.status != 404:
+                fail("webhook с неверным Telegram secret не отклоняется")
+
+            telegram_headers = {
+                "X-Telegram-Bot-Api-Secret-Token": bot.TELEGRAM_WEBHOOK_SECRET,
+            }
+            response = await client.post(
+                webhook_path,
+                data="plain text",
+                headers=telegram_headers,
+            )
+            if response.status != 415:
+                fail("webhook принимает тело не в application/json")
+
+            response = await client.post(
+                webhook_path,
+                data="{broken",
+                headers={**telegram_headers, "Content-Type": "application/json"},
+            )
+            if response.status != 400:
+                fail("webhook принимает синтаксически неверный JSON")
+
+            response = await client.post(
+                webhook_path,
+                json={"message": {"text": "/start"}},
+                headers=telegram_headers,
+            )
+            if response.status != 400:
+                fail("webhook принимает Update без целочисленного update_id")
+
+            response = await client.post(
+                webhook_path,
+                json={"update_id": 123456},
+                headers=telegram_headers,
+            )
+            if response.status != 200:
+                fail("валидный Telegram Update не принят")
+            else:
+                queued = await asyncio.wait_for(fake_app.update_queue.get(), timeout=1)
+                if queued.update_id != 123456:
+                    fail("принятый Telegram Update не попал в очередь приложения")
+
+            response = await client.post(
+                webhook_path,
+                json={"update_id": 123456},
+                headers=telegram_headers,
+            )
+            if response.status != 200:
+                fail("повторный Telegram Update не подтверждается ответом 200")
+            if not fake_app.update_queue.empty():
+                fail("повторный Telegram Update второй раз попал в очередь")
+
+            response = await client.post(
+                webhook_path,
+                data=b"x" * (bot.WEBHOOK_MAX_BODY_BYTES + 1),
+                headers={**telegram_headers, "Content-Type": "application/json"},
+            )
+            if response.status != 413:
+                fail("webhook не отклоняет тело больше установленного лимита")
+
+            response = await client.post("/cron/daily")
+            if response.status != 404:
+                fail("cron без секрета не маскируется ответом 404")
+
+            response = await client.post(
+                "/cron/daily",
+                headers={"X-Cron-Secret": bot.DAILY_CRON_SECRET},
+            )
+            if response.status != 200 or await response.text() != "started":
+                fail("cron с правильным секретом не принят")
+            await asyncio.wait_for(digest_started.wait(), timeout=1)
+        finally:
+            await client.close()
+            (
+                bot.WEBHOOK_PATH_SECRET,
+                bot.TELEGRAM_WEBHOOK_SECRET,
+                bot.DAILY_CRON_SECRET,
+                bot._run_digest_once,
+            ) = original
+
+    asyncio.run(run())
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -487,6 +615,7 @@ def main() -> int:
     groups = [
         ("Целостность данных", check_data),
         ("Security-конфигурация webhook и cron", check_runtime_security),
+        ("HTTP-защита webhook и cron", check_http_security),
         ("Сборка приложения и регистрация обработчиков", check_app_wiring),
         ("HTML-безопасность сообщений", check_html_safety),
         ("Разбивка длинных сообщений", check_long_messages),
