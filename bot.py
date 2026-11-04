@@ -1976,9 +1976,12 @@ def translate_to_russian(text: str) -> str:
         try:
             params = urllib.parse.urlencode({"client": client, "sl": "auto", "tl": "ru", "dt": "t", "q": text})
             url = f"https://translate.googleapis.com/translate_a/single?{params}"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            # requests использует certifi. urllib в slim/macOS-окружениях может
+            # не видеть системный CA bundle и тогда беззвучно возвращать
+            # английский оригинал после CERTIFICATE_VERIFY_FAILED.
+            resp = requests.get(url, headers={"User-Agent": "sea-travel-bot/1.0"}, timeout=8)
+            resp.raise_for_status()
+            data = resp.json()
             result = "".join(b[0] for b in data[0] if b[0])
             if result.strip():
                 return result.strip()
@@ -1987,9 +1990,13 @@ def translate_to_russian(text: str) -> str:
     # Fallback: MyMemory
     try:
         params = urllib.parse.urlencode({"q": text, "langpair": "en|ru"})
-        req = urllib.request.Request(f"https://api.mymemory.translated.net/get?{params}", headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        resp = requests.get(
+            f"https://api.mymemory.translated.net/get?{params}",
+            headers={"User-Agent": "sea-travel-bot/1.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         result = data.get("responseData", {}).get("translatedText", "")
         if result:
             return result.strip()

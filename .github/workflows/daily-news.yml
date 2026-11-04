@@ -2,9 +2,10 @@ name: Daily news digest
 
 on:
   schedule:
-    # Start shortly before the top-of-hour Actions peak, then wait until
-    # 05:00 UTC (10:00 Asia/Almaty) before triggering the digest.
-    - cron: "57 4 * * *"
+    # GitHub schedules are UTC by default. Use an explicit Almaty timezone and
+    # an off-peak minute; GitHub warns that high-load periods can delay runs.
+    - cron: "7 10 * * *"
+      timezone: "Asia/Almaty"
   workflow_dispatch:
 
 permissions:
@@ -23,10 +24,14 @@ jobs:
         if: github.event_name == 'schedule'
         shell: bash
         run: |
-          now="$(date -u +%s)"
-          target="$(date -u -d 'today 05:00:00' +%s)"
-          if (( now < target )); then
-            sleep "$((target - now))"
+          local_time="$(TZ=Asia/Almaty date +%H:%M)"
+          hour="${local_time%:*}"
+          minute="${local_time#*:}"
+          total=$((10#$hour * 60 + 10#$minute))
+          # A delayed GitHub schedule must never create a 17:00+ digest.
+          if (( total < 600 || total >= 660 )); then
+            echo "Skipping delayed schedule at ${local_time} Asia/Almaty"
+            exit 0
           fi
 
       - name: Trigger protected digest endpoint
