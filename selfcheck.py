@@ -18,6 +18,7 @@
 Код выхода 0 — всё чисто, 1 — есть проблемы.
 """
 import asyncio
+import copy
 import os
 import re
 import sys
@@ -38,6 +39,7 @@ except ImportError as e:  # pragma: no cover
 from telegram import ReplyKeyboardMarkup  # noqa: E402
 
 problems: list[str] = []
+REAL_TRANSLATE_TO_RUSSIAN = bot.translate_to_russian
 
 
 def fail(msg: str) -> None:
@@ -64,12 +66,12 @@ def go_offline() -> None:
     bot.search_hotels = lambda code, ck, q: [
         {"name": f"{q} Grand Hotel", "stars": 4, "area": "Center", "tag_count": 9}]
 
-    store = {"subscribers": [], "sent_hashes": []}
-    bot.load_data = lambda: {k: list(v) for k, v in store.items()}
+    store = {"subscribers": [], "sent_hashes": [], "trips": {}, "last_digest_date": ""}
+    bot.load_data = lambda: copy.deepcopy(store)
 
     def _save(data):
         store.clear()
-        store.update({k: list(v) for k, v in data.items()})
+        store.update(copy.deepcopy(data))
     bot.save_data = _save
     bot._upstash_cmd = lambda *a: None
     bot._nav_state.clear()
@@ -310,6 +312,159 @@ def check_http_security() -> None:
             ) = original
 
     asyncio.run(run())
+
+
+def check_webhook_recovery() -> None:
+    """The custom aiohttp runner must repair Telegram configuration itself.
+
+    python-telegram-bot does not call post_init from Application.initialize(),
+    which caused cold-started Render instances to look healthy while Telegram
+    still pointed at stale webhook state.
+    """
+    calls = {}
+
+    class FakeBot:
+        async def set_my_commands(self, commands):
+            calls["commands"] = commands
+
+        async def set_webhook(self, **kwargs):
+            calls["webhook"] = kwargs
+
+    class FakeApp:
+        bot = FakeBot()
+
+    original = (
+        bot.WEBHOOK_MODE,
+        bot.WEBHOOK_BASE_URL,
+        bot.WEBHOOK_PATH_SECRET,
+        bot.TELEGRAM_WEBHOOK_SECRET,
+    )
+    try:
+        bot.WEBHOOK_MODE = True
+        bot.WEBHOOK_BASE_URL = "https://example.onrender.com"
+        bot.WEBHOOK_PATH_SECRET = "P" * 40
+        bot.TELEGRAM_WEBHOOK_SECRET = "W" * 40
+        asyncio.run(bot._post_init(FakeApp()))
+        if not calls.get("commands"):
+            fail("post_init не восстанавливает меню команд")
+        webhook = calls.get("webhook") or {}
+        if webhook.get("url") != f"https://example.onrender.com/webhook/{'P' * 40}":
+            fail("post_init не восстанавливает правильный webhook URL")
+        if webhook.get("secret_token") != "W" * 40:
+            fail("post_init не передаёт Telegram webhook secret")
+        if webhook.get("drop_pending_updates") is not False:
+            fail("post_init может потерять ожидающие Telegram Update")
+    finally:
+        (
+            bot.WEBHOOK_MODE,
+            bot.WEBHOOK_BASE_URL,
+            bot.WEBHOOK_PATH_SECRET,
+            bot.TELEGRAM_WEBHOOK_SECRET,
+        ) = original
+
+
+def check_daily_digest_idempotency() -> None:
+    """Repeated wake-ups must not create duplicate daily notifications."""
+    original = (
+        bot.load_data,
+        bot.fetch_news,
+        bot.send_long,
+        bot.mark_sent_many,
+        bot.mark_daily_digest_sent,
+    )
+    today = bot.datetime.now(bot.ALMATY_TZ).date().isoformat()
+    state = {
+        "subscribers": [123],
+        "sent_hashes": [],
+        "trips": {},
+        "last_digest_date": "",
+    }
+    deliveries = []
+
+    async def fake_send_long(*args, **kwargs):
+        deliveries.append((args, kwargs))
+
+    def fake_mark_sent(hashes):
+        state["sent_hashes"].extend(hashes)
+
+    def fake_mark_date(value):
+        state["last_digest_date"] = value
+
+    try:
+        bot.load_data = lambda: copy.deepcopy(state)
+        bot.fetch_news = lambda limit=bot.MAX_NEWS, country=None: [{
+            "hash": "digest-one",
+            "title": "Новость",
+            "link": "https://example.com/news",
+            "summary": "Краткое описание",
+            "source": "Источник",
+            "flag": "🇰🇿",
+            "published": "05.11.2026",
+            "category": "Новости для путешественников",
+        }]
+        bot.send_long = fake_send_long
+        bot.mark_sent_many = fake_mark_sent
+        bot.mark_daily_digest_sent = fake_mark_date
+
+        async def run():
+            await bot.send_daily_digest(object())
+            await bot.send_daily_digest(object())
+
+        asyncio.run(run())
+        if len(deliveries) != 1:
+            fail(f"повторный scheduler отправил дайджест {len(deliveries)} раз вместо одного")
+        if state["last_digest_date"] != today:
+            fail("успешная рассылка не сохраняет дату Алматы")
+        if state["sent_hashes"] != ["digest-one"]:
+            fail("успешная рассылка некорректно сохраняет отправленные новости")
+    finally:
+        (
+            bot.load_data,
+            bot.fetch_news,
+            bot.send_long,
+            bot.mark_sent_many,
+            bot.mark_daily_digest_sent,
+        ) = original
+
+
+def check_russian_translation_transport() -> None:
+    """Regression for the production SSL failure that returned English text.
+
+    No network is used: the response is mocked, but the real translation
+    function must call requests (certifi-backed) and parse the Russian result.
+    """
+    original_get = bot.requests.get
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[[
+                "Обновлены правила получения виз в Таиланде для туристов",
+                "Thailand visa rules updated for tourists",
+                None,
+                None,
+            ]]]
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    try:
+        bot.requests.get = fake_get
+        translated = REAL_TRANSLATE_TO_RUSSIAN(
+            "Thailand visa rules updated for tourists"
+        )
+        if translated != "Обновлены правила получения виз в Таиланде для туристов":
+            fail("переводчик не возвращает русский результат")
+        if not calls or "translate.googleapis.com" not in calls[0][0]:
+            fail("переводчик не использует основной HTTPS-провайдер")
+        if calls and calls[0][1].get("timeout") != 8:
+            fail("переводчик вызывается без ожидаемого сетевого таймаута")
+    finally:
+        bot.requests.get = original_get
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -616,6 +771,9 @@ def main() -> int:
         ("Целостность данных", check_data),
         ("Security-конфигурация webhook и cron", check_runtime_security),
         ("HTTP-защита webhook и cron", check_http_security),
+        ("Автовосстановление Telegram webhook", check_webhook_recovery),
+        ("Защита ежедневной рассылки от дублей", check_daily_digest_idempotency),
+        ("Русский перевод новостей", check_russian_translation_transport),
         ("Сборка приложения и регистрация обработчиков", check_app_wiring),
         ("HTML-безопасность сообщений", check_html_safety),
         ("Разбивка длинных сообщений", check_long_messages),

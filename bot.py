@@ -43,6 +43,13 @@ WEBHOOK_MODE = bool(os.getenv("WEBHOOK_MODE") or os.getenv("RENDER") or os.geten
 DAILY_CRON_SECRET = os.getenv("DAILY_CRON_SECRET", "")
 WEBHOOK_PATH_SECRET = os.getenv("WEBHOOK_PATH_SECRET", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+# Render provides its public HTTPS URL automatically.  WEBHOOK_BASE_URL keeps
+# the same code portable to another host and is intentionally not a secret.
+WEBHOOK_BASE_URL = (
+    os.getenv("WEBHOOK_BASE_URL")
+    or os.getenv("RENDER_EXTERNAL_URL")
+    or ""
+).rstrip("/")
 PORT = int(os.getenv("PORT", "8080"))
 WEBHOOK_MAX_BODY_BYTES = 256 * 1024
 MIN_RUNTIME_SECRET_LENGTH = 32
@@ -2666,7 +2673,12 @@ def convert_to_kzt(amount: float, code: str) -> float | None:
 # обычным файлом рядом со скриптом.
 
 def _empty_data():
-    return {"subscribers": [], "sent_hashes": [], "trips": {}}
+    return {
+        "subscribers": [],
+        "sent_hashes": [],
+        "trips": {},
+        "last_digest_date": "",
+    }
 
 def _normalize_data(raw) -> dict:
     """Приводит данные из хранилища к ожидаемой форме. Без этого один битый
@@ -2677,10 +2689,17 @@ def _normalize_data(raw) -> dict:
     subs = raw.get("subscribers")
     hashes = raw.get("sent_hashes")
     trips = raw.get("trips")
+    last_digest_date = raw.get("last_digest_date")
     data = {
         "subscribers": [s for s in subs if isinstance(s, int)] if isinstance(subs, list) else [],
         "sent_hashes": [h for h in hashes if isinstance(h, str)] if isinstance(hashes, list) else [],
         "trips": trips if isinstance(trips, dict) else {},
+        "last_digest_date": (
+            last_digest_date
+            if isinstance(last_digest_date, str)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", last_digest_date)
+            else ""
+        ),
     }
     # Дубликаты в подписчиках означали бы дублирующиеся сообщения в рассылке.
     data["subscribers"] = list(dict.fromkeys(data["subscribers"]))
@@ -2800,6 +2819,14 @@ def mark_sent_many(hashes: list[str]):
     data = load_data()
     data["sent_hashes"].extend(hashes)
     data["sent_hashes"] = data["sent_hashes"][-500:]
+    save_data(data)
+
+
+def mark_daily_digest_sent(almaty_date: str) -> None:
+    """Persist the successful delivery date so repeated scheduler wake-ups
+    cannot send a second digest on the same Almaty calendar day."""
+    data = load_data()
+    data["last_digest_date"] = almaty_date
     save_data(data)
 
 # ─── RSS-парсинг ─────────────────────────────────────────────────────────────
@@ -3763,12 +3790,19 @@ async def send_daily_digest(bot):
     polling-режим), либо из HTTP /cron/daily, который дёргает Cloud Scheduler
     (Cloud Run-режим, где нет собственного постоянно работающего планировщика)."""
     data = await asyncio.to_thread(load_data)
+    almaty_date = datetime.now(ALMATY_TZ).date().isoformat()
+    if data.get("last_digest_date") == almaty_date:
+        log.info("Дайджест за сегодня уже отправлен — повтор пропущен")
+        return
     subscribers = data.get("subscribers") or []
-    if not subscribers: return
+    if not subscribers:
+        log.info("Дайджест не отправлен: нет подписчиков")
+        return
     news = await asyncio.to_thread(fetch_news)
-    if not news: return
+    if not news:
+        log.info("Дайджест не отправлен: свежих новостей нет")
+        return
     text = fmt_digest(news)
-    await asyncio.to_thread(mark_sent_many, [n["hash"] for n in news])
     sent = failed = 0
     for uid in subscribers:
         try:
@@ -3778,6 +3812,9 @@ async def send_daily_digest(bot):
         except Exception as e:
             failed += 1
             log.warning(f"Send error {uid}: {e}")
+    if sent:
+        await asyncio.to_thread(mark_sent_many, [n["hash"] for n in news])
+        await asyncio.to_thread(mark_daily_digest_sent, almaty_date)
     log.info(f"Дайджест разослан: {sent} ок, {failed} с ошибкой")
 
 async def send_daily_job(ctx: ContextTypes.DEFAULT_TYPE):
@@ -3871,6 +3908,25 @@ async def _post_init(app: Application):
         await app.bot.set_my_commands([BotCommand(c, d) for c, d in BOT_COMMANDS])
     except Exception as e:
         log.warning(f"set_my_commands failed: {e}")
+    if WEBHOOK_MODE:
+        if not WEBHOOK_BASE_URL:
+            log.error("WEBHOOK_BASE_URL/RENDER_EXTERNAL_URL не задан — webhook не восстановлен")
+            return
+        parsed = urllib.parse.urlsplit(WEBHOOK_BASE_URL)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+            log.error("Публичный URL webhook некорректен — webhook не восстановлен")
+            return
+        try:
+            await app.bot.set_webhook(
+                url=f"{WEBHOOK_BASE_URL}/webhook/{WEBHOOK_PATH_SECRET}",
+                secret_token=TELEGRAM_WEBHOOK_SECRET,
+                drop_pending_updates=False,
+                allowed_updates=Update.ALL_TYPES,
+            )
+            log.info("Telegram webhook проверен и восстановлен")
+        except Exception as e:
+            # Never log the URL here: it contains WEBHOOK_PATH_SECRET.
+            log.error("Не удалось восстановить Telegram webhook: %s", type(e).__name__)
 
 def build_app() -> Application:
     app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
@@ -3988,6 +4044,12 @@ def run_webhook_mode():
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", PORT)
         await site.start()
+        # Application.initialize() deliberately does not call post_init.  The
+        # custom aiohttp webhook runner must do it after the port is listening,
+        # otherwise bot commands and the Telegram webhook are never repaired
+        # after a cold start or deploy.
+        if app.post_init:
+            await app.post_init(app)
         log.info(f"🌴 {BOT_DISPLAY_NAME} запущен (webhook, порт {PORT})!")
         await asyncio.Event().wait()  # держим процесс живым
 

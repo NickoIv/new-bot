@@ -83,6 +83,7 @@ python bot.py
 | `BOT_TOKEN` | да | токен от [@BotFather](https://t.me/BotFather) |
 | `WEBHOOK_MODE` | нет | `1` — поднять HTTP-сервер вместо polling |
 | `PORT` | нет | порт HTTP-сервера, по умолчанию `8080` |
+| `WEBHOOK_BASE_URL` | нет | публичный HTTPS-адрес на другом хостинге; Render автоматически предоставляет `RENDER_EXTERNAL_URL` |
 | `DAILY_CRON_SECRET` | **на публичном хостинге — да** | защита `POST /cron/daily` (заголовок `X-Cron-Secret`) |
 | `WEBHOOK_PATH_SECRET` | **в webhook-режиме — да** | случайный путь webhook; токен бота в URL не используется |
 | `TELEGRAM_WEBHOOK_SECRET` | **в webhook-режиме — да** | Telegram передаёт его в проверяемом заголовке webhook |
@@ -107,7 +108,9 @@ python bot.py
         -F "drop_pending_updates=true" \\
         "https://api.telegram.org/bot<ТОКЕН>/setWebhook"
    ```
-4. Ежедневную рассылку дёргает внешний крон (например, cron-job.org):
+4. Ежедневную рассылку дёргает внешний крон. В этом репозитории GitHub
+   Actions каждые 10 минут проверяет `/health`, чтобы бесплатный Render не
+   засыпал между Telegram-командами, а в окне 10:00–10:29 Алматы вызывает:
    ```
    POST https://<домен>/cron/daily
    X-Cron-Secret: <значение DAILY_CRON_SECRET>
