@@ -255,7 +255,7 @@ COUNTRY_KEYWORDS = {
 # про политику, бизнес, спорт и т.д.) — is_relevant() требует и то, и другое.
 TOURISM_TOPIC_KEYWORDS = [
     "travel", "tourism", "tourist", "tour", "visa", "flight", "airline", "airport",
-    "hotel", "resort", "beach", "destination", "vacation", "holiday", "cruise",
+    "hotel", "resort", "beach", "vacation", "holiday", "cruise",
     "sightseeing", "backpack", "itinerary", "visitor", "attraction",
 ]
 NEWS_ALERT_CATEGORIES = {
@@ -1975,10 +1975,10 @@ def _curated_hotel_to_item(h: dict) -> dict:
 
 # ─── Перевод ──────────────────────────────────────────────────────────────────
 
-def translate_to_russian(text: str) -> str:
+def translate_to_russian(text: str, max_chars: int = 500) -> str:
     if not text or not text.strip():
         return text
-    text = text[:500]
+    text = text[:max_chars]
     for client in ["gtx", "dict-chrome-ex"]:
         try:
             params = urllib.parse.urlencode({"client": client, "sl": "auto", "tl": "ru", "dt": "t", "q": text})
@@ -1994,6 +1994,12 @@ def translate_to_russian(text: str) -> str:
                 return result.strip()
         except Exception as e:
             log.warning(f"Translate [{client}] failed: {e}")
+    # MyMemory принимает короткие фразы. Пакет новостей может быть заметно
+    # длиннее, поэтому для него не создаём каскад отдельных запросов: именно
+    # такой каскад раньше приводил к 429 сразу у обоих бесплатных сервисов.
+    if len(text) > 500:
+        return text
+
     # Fallback: MyMemory
     try:
         params = urllib.parse.urlencode({"q": text, "langpair": "en|ru"})
@@ -2834,30 +2840,62 @@ def mark_daily_digest_sent(almaty_date: str) -> None:
 def news_hash(entry):
     return hashlib.md5((entry.get("link","") + entry.get("title","")).encode()).hexdigest()
 
-def is_relevant(entry, country=None):
-    text = (entry.get("title","") + " " + entry.get("summary","") + " " + entry.get("link","")).lower()
+def _contains_any_keyword(text: str, words) -> bool:
+    """Ищет ключ как отдельное слово/фразу, а не как часть другого слова.
+
+    Без границ ``visa`` срабатывало внутри ``revisions``, ``tour`` — внутри
+    ``tournament`` и обычные политические новости попадали в дайджест.
+    """
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", text)
+        for word in words
+    )
+
+
+def is_relevant(entry, country=None, source_country=None):
+    # RSS-анонсы часто содержат HTML. У Antara, например, каждая картинка
+    # имеет атрибут border="0" — раньше слово border принималось за новость о
+    # границе и весь общий новостной поток проходил туристический фильтр.
+    summary = re.sub(r"<[^>]+>", " ", html.unescape(entry.get("summary", "")))
+    text = (entry.get("title", "") + " " + summary).lower()
+    topic_match = _contains_any_keyword(text, TOURISM_TOPIC_KEYWORDS)
+    alert_match = any(
+        _contains_any_keyword(text, words)
+        for words in NEWS_ALERT_CATEGORIES.values()
+    )
+    if not (topic_match or alert_match):
+        return False
+
     if country:
-        place_match = any(kw in text for kw in COUNTRY_KEYWORDS.get(country, []))
-        if not place_match:
-            return False
-        # Упоминания топонима недостаточно — например, "China" встречается и в
-        # новостях про политику/бизнес. Требуем ещё и туристическую тематику.
-        return any(kw in text for kw in TOURISM_TOPIC_KEYWORDS)
-    return any(kw in text for kw in ALL_KEYWORDS)
+        # Страновой RSS уже задаёт географию, даже если заголовок говорит лишь
+        # про местный аэропорт/дорогу. Для общего источника всё равно требуем
+        # явное упоминание страны или города.
+        return source_country == country or _contains_any_keyword(
+            text, COUNTRY_KEYWORDS.get(country, [])
+        )
+
+    if source_country and source_country != "all":
+        return True
+    return any(
+        _contains_any_keyword(text, words)
+        for words in COUNTRY_KEYWORDS.values()
+    )
 
 def classify_travel_news(entry) -> tuple[int, str]:
     """Ranks actionable travel alerts above generic destination stories.
     This is intentionally keyword-based and transparent: it never claims an
     editorial fact that is not in the linked original publication."""
-    text = (entry.get("title", "") + " " + entry.get("summary", "")).lower()
+    summary = re.sub(r"<[^>]+>", " ", html.unescape(entry.get("summary", "")))
+    text = (entry.get("title", "") + " " + summary).lower()
     for label, words in NEWS_ALERT_CATEGORIES.items():
-        if any(word in text for word in words):
+        if _contains_any_keyword(text, words):
             return 2, label
     return 1, "Новости для путешественников"
 
 FEED_USER_AGENT = "sea-travel-bot/1.0 (+https://github.com/NickoIv/sea-travel-bot)"
 RSS_FETCH_TIMEOUT_S = 12
-TRANSLATE_WORKERS = 6
+TRANSLATE_BATCH_MAX_CHARS = 4000
+TRANSLATE_BATCH_SEPARATOR = "[[[SEA_TRAVEL_SPLIT_9F3A]]]"
 
 def _fetch_feed_entries(url: str) -> list:
     """feedparser.parse(url) сам ходит в сеть через urllib — и без таймаута.
@@ -2873,23 +2911,61 @@ def _fetch_feed_entries(url: str) -> list:
         return []
 
 def _translate_many(texts: list[str]) -> list[str]:
-    """Переводы идут параллельно. Последовательно это до 16 сетевых вызовов
-    подряд (8 новостей × заголовок + анонс), каждый со своим таймаутом —
-    дайджест собирался минутами, а внешний крон успевал отвалиться."""
+    """Переводит заголовки и анонсы пакетами по одному HTTPS-запросу.
+
+    Прежние 6 параллельных воркеров создавали до 16 запросов за несколько
+    секунд. Render получал 429 одновременно от Google и MyMemory, после чего
+    пользователю показывался английский оригинал. Пакет укладывается в лимит
+    Google Translate и резко снижает частоту запросов.
+    """
     if not texts:
         return []
-    out = list(texts)
-    with ThreadPoolExecutor(max_workers=min(TRANSLATE_WORKERS, len(texts))) as pool:
-        futures = {pool.submit(translate_to_russian, t): i for i, t in enumerate(texts)}
-        for future in as_completed(futures):
-            i = futures[future]
-            try:
-                result = future.result()
-                if result:
-                    out[i] = result
-            except Exception as e:
-                log.warning(f"Translate failed: {e}")
+    prepared = [(text or "")[:500] for text in texts]
+    out = list(prepared)
+    chunks: list[list[tuple[int, str]]] = []
+    current: list[tuple[int, str]] = []
+    current_size = 0
+    separator_size = len(TRANSLATE_BATCH_SEPARATOR) + 2
+    for index, text in enumerate(prepared):
+        extra = len(text) + (separator_size if current else 0)
+        if current and current_size + extra > TRANSLATE_BATCH_MAX_CHARS:
+            chunks.append(current)
+            current = []
+            current_size = 0
+            extra = len(text)
+        current.append((index, text))
+        current_size += extra
+    if current:
+        chunks.append(current)
+
+    split_pattern = re.compile(
+        rf"\s*{re.escape(TRANSLATE_BATCH_SEPARATOR)}\s*"
+    )
+    for chunk in chunks:
+        payload = f"\n{TRANSLATE_BATCH_SEPARATOR}\n".join(
+            text for _, text in chunk
+        )
+        try:
+            translated = translate_to_russian(
+                payload, max_chars=TRANSLATE_BATCH_MAX_CHARS
+            )
+            parts = split_pattern.split(translated.strip())
+            if len(parts) != len(chunk):
+                log.warning(
+                    "Пакетный перевод вернул неожиданное число фрагментов: "
+                    f"{len(parts)} вместо {len(chunk)}"
+                )
+                continue
+            for (index, _), part in zip(chunk, parts):
+                if part.strip():
+                    out[index] = part.strip()
+        except Exception as e:
+            log.warning(f"Пакетный перевод не выполнен: {e}")
     return out
+
+
+def _has_cyrillic(text: str) -> bool:
+    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
 
 def fetch_news(limit=MAX_NEWS, country=None):
     # Раньше здесь на каждую новость (до ~180 за один сбор по всем фидам)
@@ -2906,7 +2982,7 @@ def fetch_news(limit=MAX_NEWS, country=None):
             h = news_hash(entry)
             if h in seen or h in sent_hashes:
                 continue
-            if not is_relevant(entry, country):
+            if not is_relevant(entry, country, feed_cfg["country"]):
                 continue
             pub_dt, published = None, ""
             if getattr(entry, "published_parsed", None):
@@ -2938,13 +3014,32 @@ def fetch_news(limit=MAX_NEWS, country=None):
     translations = _translate_many(
         [t for c in candidates for t in (c["title"], c["summary"])]
     )
+    translated_candidates = []
+    skipped_untranslated = 0
     for i, c in enumerate(candidates):
         title_ru, summary_ru = translations[2 * i], translations[2 * i + 1]
-        c["title"] = title_ru or c["title"] or "Без заголовка"
-        c["summary"] = summary_ru or ""
+        original_title = c["title"]
+        original_summary = c["summary"]
+        # Если бесплатный провайдер недоступен, не выдаём английский текст за
+        # русскую подборку. Такая новость останется неотправленной и сможет
+        # попасть в следующий запрос после восстановления переводчика.
+        if original_title and not _has_cyrillic(original_title) and not _has_cyrillic(title_ru):
+            skipped_untranslated += 1
+            continue
+        c["title"] = title_ru or original_title or "Без заголовка"
+        if original_summary and not _has_cyrillic(original_summary) and not _has_cyrillic(summary_ru):
+            c["summary"] = ""
+        else:
+            c["summary"] = summary_ru or ""
         c.pop("pub_dt", None)
         c.pop("priority", None)
-    return candidates
+        translated_candidates.append(c)
+    if skipped_untranslated:
+        log.warning(
+            "Не показаны новости без русского перевода: "
+            f"{skipped_untranslated}"
+        )
+    return translated_candidates
 
 def fmt_item(item, i):
     summary = item.get("summary") or ""

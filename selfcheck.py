@@ -467,6 +467,61 @@ def check_russian_translation_transport() -> None:
         bot.requests.get = original_get
 
 
+def check_batched_news_translation() -> None:
+    """News must use one batched translation call and preserve item order."""
+    original_translate = bot.translate_to_russian
+    calls = []
+
+    def fake_translate(text, max_chars=500):
+        calls.append((text, max_chars))
+        return text.replace("One", "Один").replace("Two", "Два")
+
+    try:
+        bot.translate_to_russian = fake_translate
+        translated = bot._translate_many(["One title", "One summary", "Two title"])
+        if translated != ["Один title", "Один summary", "Два title"]:
+            fail("пакетный перевод нарушает порядок или теряет фрагменты")
+        if len(calls) != 1:
+            fail("короткий дайджест переводится более чем одним сетевым пакетом")
+        if calls and bot.TRANSLATE_BATCH_SEPARATOR not in calls[0][0]:
+            fail("пакетный перевод не разделяет отдельные новости")
+        if calls and calls[0][1] != bot.TRANSLATE_BATCH_MAX_CHARS:
+            fail("пакетный перевод использует неверный лимит запроса")
+    finally:
+        bot.translate_to_russian = original_translate
+
+
+def check_news_relevance_filter() -> None:
+    def entry(title, summary=""):
+        return {"title": title, "summary": summary, "link": "https://example.com"}
+
+    if bot.is_relevant(
+        entry("Indonesia sets economic growth target", "Government reviews revisions"),
+        source_country="id",
+    ):
+        fail("общая экономическая новость проходит туристический фильтр")
+    if bot.is_relevant(entry("Child protection programme in Indonesia"), source_country="id"):
+        fail("нетуристическая социальная новость проходит туристический фильтр")
+    if not bot.is_relevant(entry("Two-day road closure in Giza"), source_country="eg"):
+        fail("важное ограничение транспорта ошибочно отфильтровано")
+    if not bot.is_relevant(entry("New Bali resort opens for tourists"), source_country="all"):
+        fail("туристическая новость с направлением ошибочно отфильтрована")
+    if bot.is_relevant(entry("New resort opens for tourists"), source_country="all"):
+        fail("общая новость без поддерживаемого направления проходит фильтр")
+    if bot._contains_any_keyword("football tournament", ["tour"]):
+        fail("туристический ключ ошибочно совпадает с частью другого слова")
+    if bot._contains_any_keyword("proposed revisions", ["visa"]):
+        fail("визовый ключ ошибочно совпадает с частью другого слова")
+    if bot.is_relevant(
+        entry(
+            "Indonesia sets economic growth target",
+            '<img align="left" border="0">Growth remains strong',
+        ),
+        source_country="id",
+    ):
+        fail("HTML-атрибут RSS ошибочно принят за туристический сигнал")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. HTML-безопасность
 # ═════════════════════════════════════════════════════════════════════════════
@@ -774,6 +829,8 @@ def main() -> int:
         ("Автовосстановление Telegram webhook", check_webhook_recovery),
         ("Защита ежедневной рассылки от дублей", check_daily_digest_idempotency),
         ("Русский перевод новостей", check_russian_translation_transport),
+        ("Пакетный перевод новостей", check_batched_news_translation),
+        ("Фильтр туристических новостей", check_news_relevance_filter),
         ("Сборка приложения и регистрация обработчиков", check_app_wiring),
         ("HTML-безопасность сообщений", check_html_safety),
         ("Разбивка длинных сообщений", check_long_messages),
