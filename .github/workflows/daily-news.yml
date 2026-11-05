@@ -5,7 +5,9 @@ on:
     # A single daily GitHub schedule was delayed by 5-8 hours. Frequent actual
     # runs both keep the free Render service awake and make the delivery window
     # independent of any one delayed event. The server prevents duplicates.
-    - cron: "*/10 * * * *"
+    # Offset from round clock boundaries, where GitHub reports the heaviest
+    # scheduled-workflow load: 03, 13, 23, 33, 43 and 53 each hour.
+    - cron: "3-59/10 * * * *"
   workflow_dispatch:
     inputs:
       send_digest:
